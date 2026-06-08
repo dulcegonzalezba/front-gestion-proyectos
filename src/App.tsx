@@ -924,7 +924,17 @@ export default function App() {
     if (!snap) return;
     setPdfGenerating(true);
     try {
-      const blob = await pdf(<PdfTemplate snap={snap} />).toBlob();
+      // Trae los acuerdos vigentes para incluirlos en el reporte (no viven en el snapshot)
+      let acuerdos = (snap as any).acuerdos;
+      if (!acuerdos) {
+        try {
+          const token = getToken();
+          const res = await fetch('/api/acuerdos', { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+          if (res.ok) acuerdos = await res.json();
+        } catch { /* sin acuerdos si falla la red */ }
+      }
+      const snapForPdf = { ...snap, acuerdos: acuerdos || [] };
+      const blob = await pdf(<PdfTemplate snap={snapForPdf} />).toBlob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       const match = snap.isoWeek.match(/W(\d+)-(\d+)/);

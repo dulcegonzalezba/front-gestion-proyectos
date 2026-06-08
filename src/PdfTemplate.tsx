@@ -54,6 +54,17 @@ type ChecklistItem = {
   projectId?: string;
 };
 
+type SnapAcuerdo = {
+  id: string;
+  title: string;
+  resp: string;
+  committedWeek: string;
+  dueWeek?: string;
+  status: string;          // PENDIENTE | CUMPLIDO | INCUMPLIDO | PARCIAL
+  celulaName?: string;
+  notes?: string;
+};
+
 export type CheckpointSnap = {
   savedAt: string;
   week: string;
@@ -67,6 +78,7 @@ export type CheckpointSnap = {
   };
   pmo: SnapPmoItem[];
   checklist: ChecklistItem[];
+  acuerdos?: SnapAcuerdo[];
 };
 
 // ── Status helpers ─────────────────────────────────────────────────────────
@@ -95,6 +107,24 @@ function sev(status: string): 'red' | 'gold' | 'gray' {
   return 'gray';
 }
 const SEV_ACCENT = { red: '#b91c1c', gold: '#C9A84C', gray: '#A9A097' };
+
+// ── Acuerdos: etiqueta, orden por relevancia y color del acento/tag ─────────
+const ACUERDO_LABEL: Record<string, string> = {
+  PENDIENTE: 'Pendiente', CUMPLIDO: 'Cumplido', INCUMPLIDO: 'Incumplido', PARCIAL: 'Parcial',
+};
+// Primero lo que requiere atención (incumplido/pendiente/parcial), al final lo cumplido.
+const ACUERDO_ORDER = ['INCUMPLIDO', 'PENDIENTE', 'PARCIAL', 'CUMPLIDO'];
+function acuerdoSev(status: string): 'red' | 'gold' | 'green' | 'gray' {
+  if (status === 'INCUMPLIDO') return 'red';
+  if (status === 'PENDIENTE' || status === 'PARCIAL') return 'gold';
+  if (status === 'CUMPLIDO') return 'green';
+  return 'gray';
+}
+const ACUERDO_ACCENT = { red: '#b91c1c', gold: '#C9A84C', green: '#15803d', gray: '#A9A097' };
+
+// "2026-W18" → "W18/2026" (más legible en el reporte)
+const semanaLabel = (iso?: string) =>
+  iso ? iso.replace(/(\d{4})-W(\d{2})/, (_m, y, w) => `W${w}/${y}`) : '';
 
 // ── StyleSheet — paleta PDF invertida ─────────────────────────────────────
 const styles = StyleSheet.create({
@@ -221,6 +251,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#e2e8f0',
     color: '#475569',
     fontSize: 7,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 2,
+    marginLeft: 4,
+    alignSelf: 'flex-start',
+  },
+  tagDone: {
+    backgroundColor: '#14532d',
+    color: '#bbf7d0',
+    fontSize: 7,
+    fontFamily: 'Helvetica-Bold',
     paddingHorizontal: 4,
     paddingVertical: 1,
     borderRadius: 2,
@@ -387,6 +428,11 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
   // ── Tareas de esta semana (activas, excluye completadas) ──
   const weekTasks = allTasks.filter(t => WEEK.includes(t.status) && !DONE.includes(t.status));
 
+  // ── Acuerdos tomados (ordenados: incumplido/pendiente/parcial primero) ──
+  const acuerdos = (snap.acuerdos || [])
+    .slice()
+    .sort((a, b) => ACUERDO_ORDER.indexOf(a.status) - ACUERDO_ORDER.indexOf(b.status));
+
   // ── KPIs ──
   const kpiEnfoques = activeFocus.length;
   const kpiPrio     = prioritized.length;
@@ -484,7 +530,39 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
             : weekTasks.map((t, i) => taskCard(t, i))}
         </View>
 
-        {/* ── 6. Carga por Célula ────────────────────────────────────── */}
+        {/* ── 6. Acuerdos tomados ────────────────────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Acuerdos tomados</Text>
+          <Text style={styles.sectionIntro}>Compromisos del equipo y su estado de cumplimiento.</Text>
+          {acuerdos.length === 0
+            ? <Text style={styles.emptyNote}>Sin acuerdos registrados.</Text>
+            : acuerdos.map((a, i) => {
+                const s = acuerdoSev(a.status);
+                const tagStyle = s === 'red' ? styles.tagUrgent
+                  : s === 'green' ? styles.tagDone
+                  : s === 'gold' ? styles.tagGold : styles.tagGray;
+                const meta = [
+                  a.resp || 'Sin responsable',
+                  a.celulaName,
+                  a.committedWeek ? `comprometido ${semanaLabel(a.committedWeek)}${a.dueWeek ? ` → ${semanaLabel(a.dueWeek)}` : ''}` : '',
+                ].filter(Boolean).join('  ·  ');
+                const note = (a.notes || '').trim();
+                return (
+                  <View key={a.id || i} style={[styles.cardRow, { borderLeftColor: ACUERDO_ACCENT[s] }]} wrap={false}>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                        <Text style={styles.itemTitle}>{a.title.substring(0, 95)}</Text>
+                        <Text style={tagStyle}>{ACUERDO_LABEL[a.status] ?? a.status}</Text>
+                      </View>
+                      <Text style={styles.itemMeta}>{meta}</Text>
+                      {note.length > 0 && <Text style={styles.itemNote}>{note.substring(0, 220)}</Text>}
+                    </View>
+                  </View>
+                );
+              })}
+        </View>
+
+        {/* ── 7. Carga por Célula ────────────────────────────────────── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Carga por Célula</Text>
           <View style={styles.tableHeader}>
@@ -509,7 +587,7 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
           })}
         </View>
 
-        {/* ── 7. Footer ──────────────────────────────────────────────── */}
+        {/* ── 8. Footer ──────────────────────────────────────────────── */}
         <View style={styles.footer} fixed>
           <View style={styles.footerSeparator} />
           <Text
