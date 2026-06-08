@@ -70,15 +70,31 @@ export type CheckpointSnap = {
 };
 
 // ── Status helpers ─────────────────────────────────────────────────────────
-const DONE     = ['COMPLETADO', 'LISTO_PROD', 'ARCHIVADO'];
-const CRITICAL = ['URGENTE', 'BLOQUEADO', 'BLOQUEANTE', 'ALTA_PRIORIDAD', 'PENDIENTE', 'PRIORITARIO'];
-const ACTIVE   = ['ACTIVO', 'EN_CURSO', 'SEGUIMIENTO', 'ESTA_SEMANA', 'COORDINADO', 'ALTA_PRIORIDAD'];
+const DONE        = ['COMPLETADO', 'LISTO_PROD', 'ARCHIVADO'];
+// Buckets alineados con el panel de Inicio (nada estático)
+const WEEK        = ['ESTA_SEMANA'];
+const PRIORITY    = ['URGENTE', 'BLOQUEANTE', 'BLOQUEADO', 'PRIORITARIO', 'IMPORTANTE', 'ALTA_PRIORIDAD'];
+const IN_PROGRESS = ['EN_CURSO', 'ACTIVO', 'SEGUIMIENTO', 'COORDINADO'];
+const ACTIVE      = ['ACTIVO', 'EN_CURSO', 'SEGUIMIENTO', 'ESTA_SEMANA', 'COORDINADO', 'ALTA_PRIORIDAD'];
 
-function tagStyle(status: string): 'urgent' | 'gold' | 'gray' {
-  if (['URGENTE', 'BLOQUEADO', 'BLOQUEANTE'].includes(status)) return 'urgent';
-  if (['ESTA_SEMANA', 'ALTA_PRIORIDAD', 'PRIORITARIO', 'PENDIENTE'].includes(status)) return 'gold';
+// Etiquetas legibles para directivos (en vez del código crudo del estado)
+const STATUS_LABEL: Record<string, string> = {
+  URGENTE: 'Urgente', BLOQUEADO: 'Bloqueado', BLOQUEANTE: 'Bloqueante', IMPORTANTE: 'Importante',
+  PRIORITARIO: 'Prioritario', PENDIENTE: 'Pendiente', REVISAR: 'Revisar', ALTA_PRIORIDAD: 'Alta prioridad',
+  ESTA_SEMANA: 'Esta semana', PENDIENTE_ANTERIOR: 'Pend. anterior', POSIBLE: 'Posible', ESTIMACION: 'Estimación',
+  ACTIVO: 'Activo', EN_CURSO: 'En curso', SEGUIMIENTO: 'Seguimiento', COORDINADO: 'Coordinado',
+  PAUSADO: 'Pausado', COMPLETADO: 'Completado', POR_PLANEAR: 'Por planear', BANDERA_AMARILLA: 'Bandera amarilla',
+  LISTO_PROD: 'Listo para prod', NO_INICIADA: 'No iniciada', ARCHIVADO: 'Archivado',
+};
+const label = (s: string) => STATUS_LABEL[s] ?? s;
+
+// Severidad → color del tag y del acento lateral
+function sev(status: string): 'red' | 'gold' | 'gray' {
+  if (['URGENTE', 'BLOQUEADO', 'BLOQUEANTE'].includes(status)) return 'red';
+  if (['PRIORITARIO', 'IMPORTANTE', 'ALTA_PRIORIDAD', 'ESTA_SEMANA'].includes(status)) return 'gold';
   return 'gray';
 }
+const SEV_ACCENT = { red: '#b91c1c', gold: '#C9A84C', gray: '#A9A097' };
 
 // ── StyleSheet — paleta PDF invertida ─────────────────────────────────────
 const styles = StyleSheet.create({
@@ -168,6 +184,15 @@ const styles = StyleSheet.create({
     color: '#6B5540',
     fontSize: 8,
     marginTop: 1,
+  },
+  itemNote: {
+    color: '#5C4A35',
+    fontSize: 8,
+    marginTop: 3,
+    lineHeight: 1.35,
+    paddingTop: 3,
+    borderTopWidth: 0.5,
+    borderTopColor: '#E0D6C6',
   },
   // Tags
   tagUrgent: {
@@ -260,6 +285,66 @@ const styles = StyleSheet.create({
     width: 52,
     textAlign: 'center',
   },
+  // Resumen ejecutivo (KPIs)
+  summaryRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 24,
+    paddingTop: 14,
+    gap: 8,
+  },
+  kpi: {
+    flex: 1,
+    backgroundColor: '#F5F0E8',
+    borderRadius: 4,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    borderLeftWidth: 3,
+  },
+  kpiValue: {
+    fontSize: 19,
+    fontFamily: 'Helvetica-Bold',
+    color: '#3D2412',
+  },
+  kpiLabel: {
+    fontSize: 7,
+    color: '#6B5540',
+    marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  // Intro de sección
+  sectionIntro: {
+    color: '#8A7256',
+    fontSize: 8,
+    marginTop: -4,
+    marginBottom: 8,
+  },
+  // Fila de prioridad / objetivo (tarjeta con acento)
+  cardRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 5,
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    backgroundColor: '#F5F0E8',
+    borderRadius: 3,
+    borderLeftWidth: 3,
+  },
+  cellChip: {
+    fontSize: 7,
+    color: '#5C4A35',
+    backgroundColor: '#E7DFD2',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 2,
+    marginLeft: 4,
+    alignSelf: 'flex-start',
+  },
+  emptyNote: {
+    fontSize: 9,
+    color: '#9C8B72',
+    marginBottom: 6,
+  },
   // Footer
   footer: {
     position: 'absolute',
@@ -282,10 +367,31 @@ const styles = StyleSheet.create({
 // ── Componente principal ───────────────────────────────────────────────────
 export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
   const cells = snap.data?.cells || {};
+  const focus = snap.data?.focus || [];
 
-  const activeFocus      = (snap.data?.focus      || []).filter(f => !DONE.includes(f.status)).slice(0, 8);
-  const activePriorities = (snap.data?.priorities || []).filter(p => !DONE.includes(p.status));
-  const activePmo        = (snap.pmo              || []).filter(p => !DONE.includes(p.status)).slice(0, 6);
+  // ── Fuente única: tareas reales de las células (mismas que el panel de Inicio).
+  // NO se usa la lista 'priorities' porque se desincroniza y muestra como
+  // pendientes/semana tareas que en realidad ya están completadas en su célula.
+  const allTasks = Object.entries(cells).flatMap(([cellName, cell]) =>
+    (cell.tasks || []).map(t => ({ ...t, cell: cellName }))
+  );
+
+  // ── Enfoques / objetivos de la semana (activos, no completados) ──
+  const activeFocus = focus.filter(f => !DONE.includes(f.status));
+
+  // ── Urgentes · Importantes · Alta prioridad (activas, ordenadas por severidad) ──
+  const prioritized = allTasks
+    .filter(t => PRIORITY.includes(t.status) && !DONE.includes(t.status))
+    .sort((a, b) => PRIORITY.indexOf(a.status) - PRIORITY.indexOf(b.status));
+
+  // ── Tareas de esta semana (activas, excluye completadas) ──
+  const weekTasks = allTasks.filter(t => WEEK.includes(t.status) && !DONE.includes(t.status));
+
+  // ── KPIs ──
+  const kpiEnfoques = activeFocus.length;
+  const kpiPrio     = prioritized.length;
+  const kpiSemana   = weekTasks.length;
+  const kpiCurso    = allTasks.filter(t => IN_PROGRESS.includes(t.status)).length;
 
   const generatedDate = new Date(snap.savedAt).toLocaleDateString('es-MX', {
     weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
@@ -294,6 +400,26 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
     hour: '2-digit', minute: '2-digit',
   });
 
+  // ── Tarjeta reutilizable (título + tag + responsable/célula + notas) ──
+  const taskCard = (t: { id?: string; title: string; resp: string; status: string; cell?: string; notes?: string }, key: number) => {
+    const s = sev(t.status);
+    const note = (t.notes || '').trim();
+    return (
+      <View key={key} style={[styles.cardRow, { borderLeftColor: SEV_ACCENT[s] }]} wrap={false}>
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+            <Text style={styles.itemTitle}>{t.title.substring(0, 95)}</Text>
+            <Text style={s === 'red' ? styles.tagUrgent : s === 'gold' ? styles.tagGold : styles.tagGray}>
+              {label(t.status)}
+            </Text>
+          </View>
+          <Text style={styles.itemMeta}>{t.resp || 'Sin responsable'}{t.cell ? ` · ${t.cell}` : ''}</Text>
+          {note.length > 0 && <Text style={styles.itemNote}>{note.substring(0, 220)}</Text>}
+        </View>
+      </View>
+    );
+  };
+
   return (
     <Document title={`Reporte SIGOB PMO — ${snap.isoWeek}`} author="SIGOB PMO">
       <Page size="A4" style={styles.page}>
@@ -301,129 +427,71 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
         {/* ── 1. Header ──────────────────────────────────────────────── */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <Text style={styles.headerTitle}>SIGOB PMO</Text>
-            <Text style={styles.headerWeek}>{snap.week}</Text>
+            <Text style={styles.headerTitle}>SIGOB · Fábrica de Software</Text>
+            <Text style={styles.headerWeek}>Reporte semanal · {snap.week}</Text>
           </View>
           <View style={styles.headerRight}>
             <Text style={styles.headerIso}>{snap.isoWeek}</Text>
             <Text style={styles.headerDate}>{generatedDate} · {generatedTime}</Text>
           </View>
         </View>
-
-        {/* ── 2. Franja dorada ───────────────────────────────────────── */}
         <View style={styles.goldStripe} />
 
-        {/* ── 3. Enfoque Semanal ─────────────────────────────────────── */}
-        {activeFocus.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Enfoque Semanal</Text>
-            {activeFocus.map((f, i) => {
-              const ts = tagStyle(f.status);
-              return (
-                <View key={i} style={styles.itemRow}>
-                  <Text style={styles.bullet}>•</Text>
-                  <View style={styles.itemContent}>
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-                      <Text style={styles.itemTitle}>{f.title.substring(0, 80)}</Text>
-                      <Text style={ts === 'urgent' ? styles.tagUrgent : ts === 'gold' ? styles.tagGold : styles.tagGray}>
-                        {f.status}
-                      </Text>
-                    </View>
-                    <Text style={styles.itemMeta}>{f.resp}{f.cell ? ` · ${f.cell}` : ''}</Text>
-                  </View>
-                </View>
-              );
-            })}
+        {/* ── 2. Resumen ejecutivo ───────────────────────────────────── */}
+        <View style={styles.summaryRow}>
+          <View style={[styles.kpi, { borderLeftColor: '#C9A84C' }]}>
+            <Text style={styles.kpiValue}>{kpiEnfoques}</Text>
+            <Text style={styles.kpiLabel}>Enfoques</Text>
           </View>
-        )}
-
-        {/* ── 4. Prioridades Activas ─────────────────────────────────── */}
-        {activePriorities.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Prioridades Activas</Text>
-            {activePriorities.map((p, i) => {
-              const ts = tagStyle(p.status);
-              return (
-                <View key={i} style={styles.itemRow}>
-                  <Text style={styles.bullet}>•</Text>
-                  <View style={styles.itemContent}>
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-                      <Text style={styles.itemTitle}>{p.title.substring(0, 80)}</Text>
-                      <Text style={ts === 'urgent' ? styles.tagUrgent : ts === 'gold' ? styles.tagGold : styles.tagGray}>
-                        {p.status}
-                      </Text>
-                    </View>
-                    <Text style={styles.itemMeta}>{p.resp}{p.cell ? ` · ${p.cell}` : ''}</Text>
-                  </View>
-                </View>
-              );
-            })}
+          <View style={[styles.kpi, { borderLeftColor: '#b91c1c' }]}>
+            <Text style={styles.kpiValue}>{kpiPrio}</Text>
+            <Text style={styles.kpiLabel}>Urgentes / Prioridad</Text>
           </View>
-        )}
-
-        {/* ── 5. Tareas Críticas por Célula ─────────────────────────── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Tareas Críticas</Text>
-          {Object.entries(cells).map(([cellName, cell]) => {
-            const critical = (cell.tasks || []).filter(t => CRITICAL.includes(t.status)).slice(0, 5);
-            if (critical.length === 0) return null;
-            return (
-              <View key={cellName}>
-                <Text style={styles.cellSubHeader}>{cellName}</Text>
-                {critical.map((t, i) => {
-                  const ts = tagStyle(t.status);
-                  return (
-                    <View key={i} style={styles.itemRow}>
-                      <Text style={styles.bullet}>▸</Text>
-                      <View style={styles.itemContent}>
-                        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-                          <Text style={styles.itemTitle}>{t.title.substring(0, 75)}</Text>
-                          <Text style={ts === 'urgent' ? styles.tagUrgent : ts === 'gold' ? styles.tagGold : styles.tagGray}>
-                            {t.status}
-                          </Text>
-                        </View>
-                        <Text style={styles.itemMeta}>{t.resp}</Text>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            );
-          })}
+          <View style={[styles.kpi, { borderLeftColor: '#a16207' }]}>
+            <Text style={styles.kpiValue}>{kpiSemana}</Text>
+            <Text style={styles.kpiLabel}>Esta semana</Text>
+          </View>
+          <View style={[styles.kpi, { borderLeftColor: '#1d4ed8' }]}>
+            <Text style={styles.kpiValue}>{kpiCurso}</Text>
+            <Text style={styles.kpiLabel}>En curso</Text>
+          </View>
         </View>
 
-        {/* ── 6. Plan PMO ───────────────────────────────────────────── */}
-        {activePmo.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Plan PMO</Text>
-            {activePmo.map((p, i) => {
-              const ts = tagStyle(p.status);
-              return (
-                <View key={i} style={styles.itemRow}>
-                  <Text style={styles.bullet}>•</Text>
-                  <View style={styles.itemContent}>
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-                      <Text style={styles.itemTitle}>{p.title.substring(0, 80)}</Text>
-                      <Text style={ts === 'urgent' ? styles.tagUrgent : ts === 'gold' ? styles.tagGold : styles.tagGray}>
-                        {p.status}
-                      </Text>
-                    </View>
-                    <Text style={styles.itemMeta}>{p.resp} · {p.area}</Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        )}
+        {/* ── 3. Enfoques de la semana (objetivos) ───────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Enfoques de la semana</Text>
+          <Text style={styles.sectionIntro}>Objetivos y focos de la fábrica de software para la semana.</Text>
+          {activeFocus.length === 0
+            ? <Text style={styles.emptyNote}>Sin enfoques activos registrados.</Text>
+            : activeFocus.map((f, i) => taskCard(f, i))}
+        </View>
 
-        {/* ── 7. Carga por Célula ────────────────────────────────────── */}
+        {/* ── 4. Urgentes · Importantes · Alta prioridad ─────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Urgentes · Importantes · Alta prioridad</Text>
+          <Text style={styles.sectionIntro}>Tareas que no deben perder visibilidad esta semana.</Text>
+          {prioritized.length === 0
+            ? <Text style={styles.emptyNote}>Sin tareas urgentes ni prioritarias.</Text>
+            : prioritized.map((t, i) => taskCard(t, i))}
+        </View>
+
+        {/* ── 5. Tareas comprometidas esta semana ────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Comprometidas esta semana</Text>
+          <Text style={styles.sectionIntro}>Tareas marcadas para abordarse en la semana en curso.</Text>
+          {weekTasks.length === 0
+            ? <Text style={styles.emptyNote}>Sin tareas comprometidas para esta semana.</Text>
+            : weekTasks.map((t, i) => taskCard(t, i))}
+        </View>
+
+        {/* ── 6. Carga por Célula ────────────────────────────────────── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Carga por Célula</Text>
           <View style={styles.tableHeader}>
             <Text style={styles.tableHeaderCell}>Célula</Text>
-            <Text style={styles.tableHeaderNum}>🔴 Crit.</Text>
-            <Text style={styles.tableHeaderNum}>🔵 Activas</Text>
-            <Text style={styles.tableHeaderNum}>✅ Ok</Text>
+            <Text style={styles.tableHeaderNum}>Urgentes</Text>
+            <Text style={styles.tableHeaderNum}>En curso</Text>
+            <Text style={styles.tableHeaderNum}>Listas</Text>
           </View>
           {Object.entries(cells).map(([cellName, cell], i) => {
             const tasks       = cell.tasks || [];
@@ -441,12 +509,15 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
           })}
         </View>
 
-        {/* ── 8. Footer ──────────────────────────────────────────────── */}
+        {/* ── 7. Footer ──────────────────────────────────────────────── */}
         <View style={styles.footer} fixed>
           <View style={styles.footerSeparator} />
-          <Text style={styles.footerText}>
-            SIGOB PMO  ·  checkpoint: {snap.isoWeek}  ·  {generatedDate}, {generatedTime}
-          </Text>
+          <Text
+            style={styles.footerText}
+            render={({ pageNumber, totalPages }) =>
+              `SIGOB · Fábrica de Software  ·  ${snap.week}  ·  ${generatedDate}, ${generatedTime}  ·  Pág. ${pageNumber}/${totalPages}`
+            }
+          />
         </View>
 
       </Page>

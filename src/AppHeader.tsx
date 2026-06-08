@@ -9,6 +9,7 @@ interface AppHeaderProps {
   refreshing?: boolean;
   liveIndicatorState?: "live" | "saving" | "checkpoint" | "error";
   onSaveCheckpoint?: () => void;
+  onGeneratePdf?: () => void;
   onBackToLive?: () => void;
   pdfGenerating?: boolean;
 }
@@ -29,7 +30,7 @@ const BTN_BASE = {
 
 export default function AppHeader({
   activeTab, onTabChange, week, onLogout, onRefresh,
-  refreshing, liveIndicatorState, onSaveCheckpoint, onBackToLive, pdfGenerating,
+  refreshing, liveIndicatorState, onSaveCheckpoint, onGeneratePdf, onBackToLive, pdfGenerating,
 }: AppHeaderProps) {
   return (
     <header
@@ -136,23 +137,44 @@ export default function AppHeader({
             </button>
           </>
         ) : (
-          <button
-            onClick={onSaveCheckpoint}
-            disabled={liveIndicatorState === "saving"}
-            title="Guardar Checkpoint"
-            style={{
-              ...BTN_BASE,
-              border: `1px solid ${liveIndicatorState === "saving" ? "#272B40" : "#C9A84C"}`,
-              borderRadius: 8,
-              color: liveIndicatorState === "saving" ? "#3E4260" : "#C9A84C",
-              cursor: liveIndicatorState === "saving" ? "default" : "pointer",
-              fontSize: 11, fontWeight: 600,
-              minHeight: 36, padding: "0 12px",
-              opacity: liveIndicatorState === "saving" ? 0.6 : 1,
-            }}
-          >
-            {liveIndicatorState === "saving" ? "Guardando..." : "Checkpoint"}
-          </button>
+          <>
+            {onGeneratePdf && (
+              <button
+                onClick={onGeneratePdf}
+                disabled={pdfGenerating}
+                title="Generar PDF del reporte semanal (datos en vivo)"
+                style={{
+                  ...BTN_BASE,
+                  border: `1px solid ${pdfGenerating ? "#272B40" : "#818cf8"}`,
+                  borderRadius: 8,
+                  color: pdfGenerating ? "#3E4260" : "#818cf8",
+                  cursor: pdfGenerating ? "default" : "pointer",
+                  fontSize: 11, fontWeight: 600,
+                  minHeight: 36, padding: "0 12px",
+                  opacity: pdfGenerating ? 0.6 : 1,
+                }}
+              >
+                {pdfGenerating ? "Generando..." : "📄 PDF"}
+              </button>
+            )}
+            <button
+              onClick={onSaveCheckpoint}
+              disabled={liveIndicatorState === "saving"}
+              title="Guardar Checkpoint"
+              style={{
+                ...BTN_BASE,
+                border: `1px solid ${liveIndicatorState === "saving" ? "#272B40" : "#C9A84C"}`,
+                borderRadius: 8,
+                color: liveIndicatorState === "saving" ? "#3E4260" : "#C9A84C",
+                cursor: liveIndicatorState === "saving" ? "default" : "pointer",
+                fontSize: 11, fontWeight: 600,
+                minHeight: 36, padding: "0 12px",
+                opacity: liveIndicatorState === "saving" ? 0.6 : 1,
+              }}
+            >
+              {liveIndicatorState === "saving" ? "Guardando..." : "Checkpoint"}
+            </button>
+          </>
         )}
 
         {/* Refresh */}

@@ -9,6 +9,7 @@ interface Props {
   pmoItems?: any[];
   onView?: (snap: any) => void;
   onGeneratePdf?: (snap: any) => void;
+  onDeleteCheckpoint?: (id: number) => void | Promise<void>;
   pdfGenerating?: boolean;
 }
 
@@ -47,12 +48,13 @@ function fmtDate(iso: string) {
   });
 }
 
-export default function CheckpointTimeline({ checkpoints, currentWeek, onView, onGeneratePdf, pdfGenerating }: Props) {
+export default function CheckpointTimeline({ checkpoints, currentWeek, onView, onGeneratePdf, onDeleteCheckpoint, pdfGenerating }: Props) {
   const [selection, setSelection] = useState<number[]>([]);
   const [detail, setDetail] = useState<any | null>(null);
   const [comparison, setComparison] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
 
   const toggleSelect = (id: number) => {
     if (selection.includes(id)) {
@@ -274,6 +276,32 @@ export default function CheckpointTimeline({ checkpoints, currentWeek, onView, o
               </div>
               {cp.isoWeek === currentWeek && (
                 <span style={{ fontSize: 9, color: "#22c55e", fontWeight: 700 }}>ACTUAL</span>
+              )}
+              {onDeleteCheckpoint && (
+                confirmDelete === cp.id ? (
+                  <span style={{ display: "flex", gap: 4, alignItems: "center" }} onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => { onDeleteCheckpoint(cp.id); setConfirmDelete(null); }}
+                      style={{ background: "#7f1d1d", color: "#fca5a5", border: "none", borderRadius: 6, padding: "3px 9px", fontSize: 10, fontWeight: 600, cursor: "pointer" }}
+                    >
+                      Eliminar
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(null)}
+                      style={{ background: "#1A1D28", color: "#7A7F9A", border: "none", borderRadius: 6, padding: "3px 7px", fontSize: 10, cursor: "pointer" }}
+                    >
+                      No
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={e => { e.stopPropagation(); setConfirmDelete(cp.id); }}
+                    title="Eliminar checkpoint"
+                    style={{ background: "none", border: "none", color: "#4A4F64", cursor: "pointer", fontSize: 13, padding: "2px 4px", flexShrink: 0 }}
+                  >
+                    🗑
+                  </button>
+                )
               )}
             </div>
           );

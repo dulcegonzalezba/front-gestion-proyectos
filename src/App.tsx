@@ -44,6 +44,8 @@ const CELL_CLR = {
   "Frontend SIR":"#ec4899","Nuevas Tec":"#10b981",
   "Reporteador Nayarit":"#64748b","Multi-celula":"#f97316"
 };
+// Paleta para colorear células creadas por el usuario (las nuevas no están en CELL_CLR)
+const CELL_PALETTE = ["#0ea5e9","#8b5cf6","#f59e0b","#ec4899","#10b981","#f97316","#ef4444","#14b8a6","#a855f7","#64748b"];
 const ISSUE_STATUS_CLR = {
   "Pendiente":"#ef4444","En proceso":"#f59e0b",
   "Pruebas internas":"#d97706","Listo":"#16a34a","Completado":"#6b7280"
@@ -397,6 +399,8 @@ export default function App() {
   const [addingTask, setAddingTask]     = useState(null);
   const [confirmDel, setConfirmDel]     = useState(null);
   const [taskForm, setTaskForm]         = useState({title:"",resp:"",status:"PENDIENTE",notes:"",zoho:"",projectId:""});
+  const [addingCell, setAddingCell]     = useState(false);
+  const [cellForm, setCellForm]         = useState({name:"",leader:"",members:"",color:CELL_PALETTE[0]});
   const [editFocusId, setEditFocusId]   = useState(null);
   const [focusForm, setFocusForm]       = useState({title:"",resp:"",cell:"",notes:"",status:""});
   const [selectedCell, setSelectedCell] = useState<string>("Todos");
@@ -495,6 +499,7 @@ export default function App() {
             ...initCell,
             ...(sourceCell.leader ? { leader: sourceCell.leader } : {}),
             ...(sourceCell.members ? { members: sourceCell.members } : {}),
+            ...(sourceCell.color ? { color: sourceCell.color } : {}),
             tasks: mergeArr(sourceCell.tasks, initCell.tasks),
           };
         });
@@ -717,6 +722,21 @@ export default function App() {
     const deletedIds = [...new Set([...(d.deletedIds||[]), tid])];
     save({...d, deletedIds, cells:{...d.cells,[cell]:{...d.cells[cell],tasks:d.cells[cell].tasks.filter(x=>x.id!==tid)}}});
   };
+  const addCell = async () => {
+    const name = cellForm.name.trim();
+    if (!name) return;
+    if (Object.keys(d.cells).some(c => c.toLowerCase() === name.toLowerCase())) {
+      toast.error("Ya existe una célula con ese nombre");
+      return;
+    }
+    const members = cellForm.members.split(",").map(s => s.trim()).filter(Boolean);
+    const newCell = { leader: cellForm.leader.trim(), members, tasks: [], color: cellForm.color };
+    await save({ ...d, cells: { ...d.cells, [name]: newCell } });
+    toast.success(`Célula "${name}" creada`);
+    setCellForm({ name:"", leader:"", members:"", color: CELL_PALETTE[0] });
+    setAddingCell(false);
+    setSelectedCell(name);
+  };
   const addChecklistItem = () => {
     const title = checklistCapture.trim();
     if (!title) return;
@@ -865,8 +885,42 @@ export default function App() {
     setLiveIndicatorState("live");
   };
 
-  const generatePdf = async (snapOverride?: CheckpointSnap) => {
-    const snap = snapOverride ?? viewingCheckpoint;
+  const deleteCheckpoint = async (id: number) => {
+    try {
+      const token = getToken();
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`/api/snapshots/${id}`, { method: "DELETE", headers });
+      if (res.status === 401) { clearToken(); navigate('/login'); return; }
+      if (!res.ok) throw new Error("delete failed");
+      // Si estábamos viendo ese checkpoint, regresar a modo edición
+      if (viewingCheckpoint && (viewingCheckpoint as any).id === id) backToLive();
+      toast.success("Checkpoint eliminado");
+      loadCheckpointList();
+    } catch {
+      toast.error("Error al eliminar checkpoint — intenta de nuevo");
+    }
+  };
+
+  // Construye un snapshot en vivo a partir del estado actual (para el PDF "al vuelo")
+  const buildLiveSnap = (): CheckpointSnap | null => {
+    if (!d) return null;
+    const now = new Date();
+    return {
+      savedAt: now.toISOString(),
+      week: d.week,
+      isoWeek: d.isoWeek || getISOWeek(now),
+      data: d,
+      pmo: pmoItems,
+      checklist: checklistItems,
+    };
+  };
+
+  const generatePdf = async (snapArg?: any) => {
+    // Acepta override solo si es un snapshot real (tiene .data); ignora eventos de click.
+    const override: CheckpointSnap | undefined = snapArg && snapArg.data ? snapArg : undefined;
+    // Prioridad: checkpoint pasado explícito → checkpoint en vista → datos EN VIVO
+    const snap = override ?? viewingCheckpoint ?? buildLiveSnap();
     if (!snap) return;
     setPdfGenerating(true);
     try {
@@ -3072,17 +3126,24 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
     });
 
     if (tab === "celulas") {
+      const cellNames = ["Todos", ...Object.keys(d?.cells || {})];
       return (
         <div>
-          {CELL_NAMES.map(name => (
+          {cellNames.map(name => (
             <button
               key={name}
-              onClick={() => setSelectedCell(name)}
-              style={itemStyle(selectedCell === name)}
+              onClick={() => { setSelectedCell(name); setAddingCell(false); }}
+              style={itemStyle(selectedCell === name && !addingCell)}
             >
               {name}
             </button>
           ))}
+          <button
+            onClick={() => { setAddingCell(true); setCellForm({ name:"", leader:"", members:"", color: CELL_PALETTE[0] }); }}
+            style={{ ...itemStyle(addingCell), color: "#C9A84C", fontWeight: 600 }}
+          >
+            + Nueva célula
+          </button>
         </div>
       );
     }
@@ -3306,6 +3367,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
         refreshing={loading}
         liveIndicatorState={liveIndicatorState}
         onSaveCheckpoint={liveIndicatorState === "checkpoint" ? generatePdf : openCheckpointDialog}
+        onGeneratePdf={() => generatePdf()}
         onBackToLive={backToLive}
         pdfGenerating={pdfGenerating}
       />
@@ -3313,6 +3375,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
         <main style={{ flex: 1, overflowY: "auto", background: "#09090C" }}>
           <HomePage
             focusItems={d?.focus}
+            tasks={Object.entries(d?.cells || {}).flatMap(([cell, c]: [string, any]) => ((c?.tasks || []) as any[]).map(t => ({ ...t, cell })))}
             onFocusUpdate={(id, updates) => d && save({ ...d, focus: d.focus.map(x => x.id === id ? { ...x, ...updates } : x) })}
             onFocusAdd={() => d && save({ ...d, focus: [...d.focus, { id: "F" + Date.now(), title: "Nuevo enfoque", resp: "", cell: "", status: "ESTA_SEMANA", notes: "" }] })}
             onFocusDelete={(id) => { if (d) { const deletedIds = [...new Set([...(d.deletedIds||[]), id])]; save({ ...d, deletedIds, focus: d.focus.filter(x => x.id !== id) }); } }}
@@ -3324,18 +3387,84 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
         <div style={{padding: 16}}>
           {tab === "celulas" && (
             d == null ? null :
+            addingCell ? (
+              <div style={{ padding: "24px 0", maxWidth: 460 }}>
+                <div style={{ fontSize: 16, fontWeight: 600, color: "#E8E3D8", marginBottom: 2 }}>Nueva célula</div>
+                <div style={{ fontSize: 11, color: "#7A7F9A", marginBottom: 20 }}>Crea un nuevo equipo para organizar y dar seguimiento a sus tareas.</div>
+                <div style={{ background: "#0F1117", borderRadius: 10, padding: 16, border: "1px solid #1E2233" }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#3E4260", marginBottom: 6, letterSpacing: "0.06em" }}>NOMBRE *</div>
+                  <input
+                    autoFocus
+                    placeholder="Ej. QA, Soporte, Infraestructura"
+                    value={cellForm.name}
+                    onChange={e => setCellForm({ ...cellForm, name: e.target.value })}
+                    onKeyDown={e => { if (e.key === "Enter") addCell(); }}
+                    style={{ background: "#14161E", color: "#E8E3D8", border: "1px solid #1E2233", borderRadius: 6, padding: "7px 9px", fontSize: 13, width: "100%", boxSizing: "border-box", marginBottom: 12, fontFamily: "system-ui,sans-serif" }}
+                  />
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#3E4260", marginBottom: 6, letterSpacing: "0.06em" }}>LÍDER</div>
+                  <input
+                    placeholder="Responsable de la célula (opcional)"
+                    value={cellForm.leader}
+                    onChange={e => setCellForm({ ...cellForm, leader: e.target.value })}
+                    style={{ background: "#14161E", color: "#E8E3D8", border: "1px solid #1E2233", borderRadius: 6, padding: "7px 9px", fontSize: 13, width: "100%", boxSizing: "border-box", marginBottom: 12, fontFamily: "system-ui,sans-serif" }}
+                  />
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#3E4260", marginBottom: 6, letterSpacing: "0.06em" }}>INTEGRANTES</div>
+                  <input
+                    placeholder="Separados por coma (opcional)"
+                    value={cellForm.members}
+                    onChange={e => setCellForm({ ...cellForm, members: e.target.value })}
+                    style={{ background: "#14161E", color: "#E8E3D8", border: "1px solid #1E2233", borderRadius: 6, padding: "7px 9px", fontSize: 13, width: "100%", boxSizing: "border-box", marginBottom: 12, fontFamily: "system-ui,sans-serif" }}
+                  />
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#3E4260", marginBottom: 6, letterSpacing: "0.06em" }}>COLOR</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+                    {CELL_PALETTE.map(c => (
+                      <button
+                        key={c}
+                        onClick={() => setCellForm({ ...cellForm, color: c })}
+                        aria-label={`Color ${c}`}
+                        style={{
+                          width: 24, height: 24, borderRadius: "50%", background: c, cursor: "pointer",
+                          border: cellForm.color === c ? "2px solid #E8E3D8" : "2px solid transparent",
+                          outline: cellForm.color === c ? `2px solid ${c}` : "none", outlineOffset: 1,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={addCell}
+                      disabled={!cellForm.name.trim()}
+                      style={{
+                        background: cellForm.name.trim() ? "#16a34a" : "#1A1D28",
+                        color: cellForm.name.trim() ? "#fff" : "#3E4260",
+                        border: "none", borderRadius: 6, padding: "7px 16px", fontSize: 12, fontWeight: 600,
+                        cursor: cellForm.name.trim() ? "pointer" : "not-allowed", fontFamily: "system-ui,sans-serif",
+                      }}
+                    >
+                      Crear célula
+                    </button>
+                    <button
+                      onClick={() => setAddingCell(false)}
+                      style={{ background: "#272B40", color: "#E8E3D8", border: "none", borderRadius: 6, padding: "7px 12px", fontSize: 12, cursor: "pointer", fontFamily: "system-ui,sans-serif" }}
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) :
             selectedCell === "Todos" ? (
               <div style={{ padding: "24px 0" }}>
                 {Object.entries(d.cells).map(([cellName, cell]) => {
                   const pending = (cell.tasks || []).filter(t => t.status !== "COMPLETADO").length;
                   const done = (cell.tasks || []).filter(t => t.status === "COMPLETADO").length;
-                  const clr = CELL_CLR[cellName] || "#64748b";
+                  const clr = cell.color || CELL_CLR[cellName] || "#64748b";
                   return (
-                    <div key={cellName} style={{
+                    <div key={cellName} onClick={() => { setSelectedCell(cellName); setAddingCell(false); }} style={{
                       display: "flex", alignItems: "center", gap: 12,
                       padding: "12px 14px", background: "#0F1117",
                       border: "1px solid #1E2233", borderRadius: 10,
-                      marginBottom: 6, borderLeft: `3px solid ${clr}`,
+                      marginBottom: 6, borderLeft: `3px solid ${clr}`, cursor: "pointer",
                     }}>
                       <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: "#E8E3D8" }}>{cellName}</span>
                       <span style={{ fontSize: 11, color: "#7A7F9A" }}>{pending} activos</span>
@@ -3344,6 +3473,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
                           {done} ok
                         </span>
                       )}
+                      <span style={{ color: "#3E4260", fontSize: 13 }}>›</span>
                     </div>
                   );
                 })}
@@ -3362,10 +3492,10 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
                     <div style={{ fontSize: 11, color: "#7A7F9A", marginBottom: 20 }}>
                       {cell.leader}{cell.members?.length > 0 ? " · " + cell.members.join(", ") : ""}
                     </div>
-                    {active.length === 0 && completed.length === 0 ? (
-                      <div style={{ color: "#7A7F9A", fontSize: 13 }}>Esta célula no tiene tareas esta semana</div>
-                    ) : (
-                      <>
+                    {active.length === 0 && completed.length === 0 && (
+                      <div style={{ color: "#7A7F9A", fontSize: 13, marginBottom: 16 }}>Esta célula no tiene tareas esta semana</div>
+                    )}
+                    <>
                         {active.map(t => {
                           const proj = projects.find(p => (p.taskRefs ?? []).some(r => r.taskId === t.id && r.cellName === selectedCell));
                           return (
@@ -3511,7 +3641,6 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
                           </div>
                         )}
                       </>
-                    )}
                   </div>
                 );
               })()
@@ -3598,7 +3727,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
                 {(() => {
                   const project = projects.find(p => p.id === selectedProject);
                   const associatedIds = new Set((project?.taskRefs ?? []).map(r => r.taskId));
-                  const cellOptions = CELL_NAMES.filter(n => n !== "Todos");
+                  const cellOptions = Object.keys(d?.cells || {});
                   const tasksInCell = associatingCell
                     ? ((d?.cells?.[associatingCell]?.tasks ?? []) as { id: string; title: string }[]).filter(t => !associatedIds.has(t.id))
                     : [];
@@ -3680,7 +3809,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
                         style={{ background: "#14161E", border: "1px solid #1E2233", borderRadius: 4, color: "#E8E3D8", fontSize: 12, padding: "6px 8px", fontFamily: "system-ui,sans-serif" }}
                       >
                         <option value="">Célula...</option>
-                        {CELL_NAMES.filter(n => n !== "Todos").map(n => <option key={n} value={n}>{n}</option>)}
+                        {Object.keys(d?.cells || {}).map(n => <option key={n} value={n}>{n}</option>)}
                       </select>
                       <input
                         placeholder="Título de la tarea *"
@@ -4055,6 +4184,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
               checkpoints={checkpointList}
               currentWeek={d?.isoWeek}
               onGeneratePdf={generatePdf}
+              onDeleteCheckpoint={deleteCheckpoint}
               pdfGenerating={pdfGenerating}
             />
           )}

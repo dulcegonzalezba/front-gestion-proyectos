@@ -77,6 +77,14 @@ const BLOCKED = ["URGENTE", "BLOQUEADO", "BLOQUEANTE", "IMPORTANTE", "PRIORITARI
 const ACTIVE  = ["EN_CURSO", "ACTIVO", "SEGUIMIENTO", "COORDINADO", "ALTA_PRIORIDAD", "ESTA_SEMANA"];
 const DONE    = ["COMPLETADO", "LISTO_PROD"];
 
+// ── Buckets de visibilidad para el panel de inicio ─────────────────────────────
+// Tareas que se abordan esta semana
+const WEEK_STATUSES     = ["ESTA_SEMANA"];
+// Tareas que NO debemos perder de vista (ordenadas por severidad)
+const PRIORITY_STATUSES = ["URGENTE", "BLOQUEANTE", "BLOQUEADO", "PRIORITARIO", "IMPORTANTE", "ALTA_PRIORIDAD"];
+// En curso (sin solaparse con las dos categorías anteriores)
+const IN_PROGRESS       = ["EN_CURSO", "ACTIVO", "SEGUIMIENTO", "COORDINADO"];
+
 // ── TASK FACTORY ──────────────────────────────────────────────────────────────
 const tk = (
   id: string, title: string, resp: string, status: string, cell: string,
@@ -514,26 +522,30 @@ const TAG_CLR: Record<string, { bg: string; color: string }> = {
 };
 
 // ── PLAN DE SALIDA HUAWEI ─────────────────────────────────────────────────────
+// Orden de apagado en Huawei. `done` marca los ya completados por defecto.
 const HUAWEI_STEPS = [
-  { id: "h1", orden: 1, sistema: "Navojoa",            detalle: "Apagar SIR + Egresos + OOMAPAS en Huawei. Validar que Curiosity esté estable antes de cortar." },
-  { id: "h2", orden: 2, sistema: "Oaxaca Municipio SIR", detalle: "Apagar instancia de Oaxaca Municipio SIR en Huawei. Confirmar DNS apuntando al nuevo servidor." },
-  { id: "h3", orden: 3, sistema: "SEIGPOL",            detalle: "Apagar SEIGPOL en Huawei. Verificar que no haya dependencias activas antes de dar de baja." },
-  { id: "h4", orden: 4, sistema: "SIGOB",              detalle: "Apagar SIGOB en Huawei. Asegurarse de que todos los módulos migrados estén operativos." },
-  { id: "h5", orden: 5, sistema: "Nayarit",            detalle: "Último en salir. Confirmar estabilidad de Plan de Estabilización antes de apagar en Huawei." },
+  { id: "h1", orden: 1, sistema: "Navojoa",          done: true, detalle: "Apagado. SIR + Egresos + OOMAPAS migrados a Curiosity y estables. ✓ Listo." },
+  { id: "h2", orden: 2, sistema: "SEIGPOL",          detalle: "Siguiente en salir. Verificar que no haya dependencias activas antes de dar de baja." },
+  { id: "h3", orden: 3, sistema: "REPUVE",           detalle: "Apagar tras confirmar el ambiente independiente de REPUVE estable en el nuevo servidor." },
+  { id: "h4", orden: 4, sistema: "Oaxaca Municipio", detalle: "Apagar instancia de Oaxaca Municipio (SIR / MultApp) en Huawei. Confirmar DNS apuntando al nuevo servidor." },
+  { id: "h5", orden: 5, sistema: "Nayarit",          detalle: "Último en salir. Confirmar estabilidad del Plan de Estabilización antes de apagar en Huawei." },
 ];
 
-const STORAGE_KEY = "huawei_exit_plan_done";
+const STORAGE_KEY = "huawei_exit_plan_done_v2";
 
 function loadHuaweiDone(): Set<string> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
+    if (raw) return new Set(JSON.parse(raw));
+    // Sin estado guardado: sembrar los pasos marcados como `done` por defecto
+    return new Set(HUAWEI_STEPS.filter(s => (s as any).done).map(s => s.id));
   } catch { return new Set(); }
 }
 
 // ── HOME PAGE ─────────────────────────────────────────────────────────────────
 interface HomePageProps {
   focusItems?: FocusItem[];
+  tasks?: Task[];
   onFocusUpdate?: (id: string, updates: Partial<FocusItem>) => void;
   onFocusAdd?: () => void;
   onFocusDelete?: (id: string) => void;
@@ -541,9 +553,7 @@ interface HomePageProps {
 
 const FOCUS_CELLS = ["DBA", "DevOps", "Backend SIR", "Frontend SIR", "Nuevas Tec", "Reporteador Nayarit", "Multi-celula"];
 
-export default function HomePage({ focusItems, onFocusUpdate, onFocusAdd, onFocusDelete }: HomePageProps = {}) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [filter, setFilter]     = useState<"all" | "blocked" | "active" | "done">("all");
+export default function HomePage({ focusItems, tasks, onFocusUpdate, onFocusAdd, onFocusDelete }: HomePageProps = {}) {
   const [huaweiDone, setHuaweiDone] = useState<Set<string>>(loadHuaweiDone);
   const [editFocusId, setEditFocusId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<FocusItem>>({});
@@ -557,38 +567,18 @@ export default function HomePage({ focusItems, onFocusUpdate, onFocusAdd, onFocu
     });
   };
 
-  const toggle = (id: string) =>
-    setExpanded(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  // ── Tareas en vivo (desde las células). Fallback a datos demo si no hay props.
+  const liveTasks: Task[] = (tasks && tasks.length ? tasks : PROJECTS_INIT.flatMap(p => p.tasks));
 
-  // ── Global metrics
-  const allTasks       = PROJECTS_INIT.flatMap(p => p.tasks);
-  const totalBloqueadas = allTasks.filter(t => BLOCKED.includes(t.status)).length;
-  const totalActivas    = allTasks.filter(t => ACTIVE.includes(t.status)).length;
-  const criticos        = PROJECTS_INIT.filter(p => p.criticality === "CRITICA").length;
-  const topRisks        = allTasks.filter(t => BLOCKED.includes(t.status)).slice(0, 8);
+  // Tareas que NO debemos perder de vista
+  const weekTasks = liveTasks.filter(t => WEEK_STATUSES.includes(t.status));
+  const prioTasks = liveTasks
+    .filter(t => PRIORITY_STATUSES.includes(t.status))
+    .sort((a, b) => PRIORITY_STATUSES.indexOf(a.status) - PRIORITY_STATUSES.indexOf(b.status));
 
-  // ── Enrich + sort
-  const enriched = PROJECTS_INIT.map(p => ({
-    ...p,
-    bloqueadas:  p.tasks.filter(t => BLOCKED.includes(t.status)).length,
-    activas:     p.tasks.filter(t => ACTIVE.includes(t.status)).length,
-    completadas: p.tasks.filter(t => DONE.includes(t.status)).length,
-  })).sort((a, b) => {
-    const cOrder = { CRITICA: 0, ALTA: 1, MEDIA: 2 } as const;
-    if (b.bloqueadas !== a.bloqueadas) return b.bloqueadas - a.bloqueadas;
-    return cOrder[a.criticality] - cOrder[b.criticality];
-  });
-
-  const filtered = enriched.filter(p => {
-    if (filter === "blocked") return p.bloqueadas > 0;
-    if (filter === "active")  return p.activas > 0;
-    if (filter === "done")    return p.completadas > 0;
-    return true;
-  });
+  // KPIs en vivo
+  const kpiEnCurso = liveTasks.filter(t => IN_PROGRESS.includes(t.status)).length;
+  const kpiDone    = liveTasks.filter(t => DONE.includes(t.status)).length;
 
   // ── helpers de estilo ─────────────────────────────────────────────────────
   const section = (mb = 20): React.CSSProperties => ({
@@ -604,6 +594,30 @@ export default function HomePage({ focusItems, onFocusUpdate, onFocusAdd, onFocu
     textTransform: "uppercase", color, marginBottom: 14,
     display: "flex", alignItems: "center", gap: 8,
   });
+
+  // Fila de tarea para los paneles de seguimiento del inicio
+  const taskRow = (t: Task) => {
+    const cc = CELL_CLR[t.cell] ?? T.text3;
+    const isPrio = PRIORITY_STATUSES.includes(t.status);
+    return (
+      <div key={t.id + t.cell} style={{
+        display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
+        background: T.surface, borderRadius: 10, marginBottom: 6,
+        border: `1px solid ${isPrio ? "rgba(239,68,68,0.2)" : T.border}`,
+      }}>
+        <StatusBadge status={t.status} />
+        <span style={{ flex: 1, fontSize: 12, color: T.text1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.title}>
+          {t.title}
+        </span>
+        {t.resp && <span style={{ fontSize: 10, color: T.text2, whiteSpace: "nowrap", flexShrink: 0 }}>{t.resp}</span>}
+        {t.cell && (
+          <span style={{ fontSize: 9, color: cc, background: cc + "18", padding: "2px 8px", borderRadius: 20, border: `1px solid ${cc}35`, whiteSpace: "nowrap", flexShrink: 0 }}>
+            {t.cell}
+          </span>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div style={{
@@ -626,17 +640,17 @@ export default function HomePage({ focusItems, onFocusUpdate, onFocusAdd, onFocu
             Semana 27 Abr — 2 May 2026
           </div>
           <div style={{ fontSize: 10, color: T.text3 }}>
-            {PROJECTS_INIT.length} proyectos · {allTasks.length} tareas registradas
+            {liveTasks.length} tareas en seguimiento · {weekTasks.length + prioTasks.length} a no perder de vista
           </div>
         </div>
       </div>
 
       {/* ── KPIs ────────────────────────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 28 }}>
-        <KpiCard label="Proyectos activos"   value={PROJECTS_INIT.length} color={T.gold}    />
-        <KpiCard label="Proyectos críticos"  value={criticos}              color="#ef4444"   />
-        <KpiCard label="Tareas bloqueadas"   value={totalBloqueadas}       color="#f97316"   />
-        <KpiCard label="En curso"            value={totalActivas}          color="#60A5FA"   />
+        <KpiCard label="Esta semana"             value={weekTasks.length} color={T.gold}  />
+        <KpiCard label="Urgentes / prioritarias" value={prioTasks.length} color="#ef4444" />
+        <KpiCard label="En curso"                value={kpiEnCurso}       color="#60A5FA" />
+        <KpiCard label="Completadas"             value={kpiDone}          color="#4ADE80" />
       </div>
 
       {/* ── FOCOS DE LA SEMANA ──────────────────────────────────────────── */}
@@ -837,7 +851,7 @@ export default function HomePage({ focusItems, onFocusUpdate, onFocusAdd, onFocu
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
           <div style={sectionLabel("#818CF8")}>
             <span style={{ width: 3, height: 14, background: "#818CF8", borderRadius: 2, display: "inline-block" }} />
-            Arquitectura Objetivo
+            Mapa de Instalaciones
           </div>
           <div style={{ display: "flex", gap: 14 }}>
             {[["prod","#4ade80"],["qa","#93c5fd"],["dev","#a5b4fc"],["config","#a8a29e"]].map(([lbl,clr]) => (
@@ -884,7 +898,7 @@ export default function HomePage({ focusItems, onFocusUpdate, onFocusAdd, onFocu
                 </div>
               ))}
               <div style={{ marginTop: 10, fontSize: 9, color: "#3E4260", lineHeight: 1.4, borderTop: "1px solid #16a34a15", paddingTop: 8 }}>
-                Servidor integral cotizado por Curiosity para todo el ecosistema Navojoa
+                Migrado y operativo. Ecosistema completo de Navojoa en servidor dedicado
               </div>
             </div>
 
@@ -899,14 +913,17 @@ export default function HomePage({ focusItems, onFocusUpdate, onFocusAdd, onFocu
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#3b82f6", boxShadow: "0 0 8px #3b82f6" }} />
                 <span style={{ fontSize: 12, fontWeight: 800, color: T.text1, letterSpacing: "0.06em" }}>VPS / VDS</span>
               </div>
-              <div style={{ fontSize: 9, color: "#93c5fd70", marginBottom: 12 }}>Infraestructura interna distribuida</div>
+              <div style={{ fontSize: 9, color: "#93c5fd70", marginBottom: 12 }}>VPS: pruebas + iPROVINAY · VDS: producción</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                 {[
-                  { name: "VPS 1", sub: "Egresos QA + Dev", tag: "qa" },
-                  { name: "VPS 2", sub: "Ingresos QA",      tag: "qa" },
-                  { name: "VPS 3", sub: "Ingresos Dev",     tag: "dev" },
-                  { name: "VDS",   sub: "Tlajomulco Prod",  tag: "prod" },
-                  { name: "VDS",   sub: "Nóminas Tlaj.",    tag: "prod" },
+                  { name: "VPS", sub: "iPROVINAY Prod",      tag: "prod" },
+                  { name: "VPS", sub: "Jalisco — SIR",       tag: "dev" },
+                  { name: "VPS", sub: "Egresos QA + Dev",    tag: "qa" },
+                  { name: "VPS", sub: "Ingresos QA",         tag: "qa" },
+                  { name: "VPS", sub: "Ingresos Dev",        tag: "dev" },
+                  { name: "VDS", sub: "Tlajomulco SIR Prod", tag: "prod" },
+                  { name: "VDS", sub: "Salamanca",           tag: "prod" },
+                  { name: "VDS", sub: "Nóminas Tlajomulco",  tag: "prod" },
                 ].map((s, i) => (
                   <div key={i} style={{
                     background: T.surface, borderRadius: 7, padding: "7px 9px",
@@ -924,7 +941,7 @@ export default function HomePage({ focusItems, onFocusUpdate, onFocusAdd, onFocu
                 ))}
               </div>
               <div style={{ marginTop: 10, fontSize: 9, color: "#3E4260", lineHeight: 1.4, borderTop: "1px solid #2563eb15", paddingTop: 8 }}>
-                Un VPS por ambiente — distribución post-reorganización
+                VPS: sistemas de pruebas + iPROVINAY (único prod en VPS). VDS: producción — Tlajomulco y Salamanca
               </div>
             </div>
 
@@ -966,7 +983,7 @@ export default function HomePage({ focusItems, onFocusUpdate, onFocusAdd, onFocu
           background: "linear-gradient(135deg,#110A00 0%,#09090E 100%)",
         }}>
           <div style={{ fontSize: 8, fontWeight: 800, color: "#d97706", letterSpacing: "0.16em", marginBottom: 14, textTransform: "uppercase" }}>
-            Ambientes de Cliente / Independientes
+            Ambiente de Cliente
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
             {[
@@ -979,30 +996,7 @@ export default function HomePage({ focusItems, onFocusUpdate, onFocusAdd, onFocu
                   { name: "Proxy → backend", tag: "config" },
                   { name: "Monitoreo",       tag: "config" },
                 ],
-                note: "WAF + DNS configurados por SIGOB. Infraestructura del cliente",
-              },
-              {
-                label: "JALISCO", sublabel: "Ambiente completo en proceso",
-                dot: "#f59e0b", glow: "#f59e0b", border: "#d9770630",
-                topLine: "#d97706",
-                systems: [
-                  { name: "SIR Frontend",  tag: "dev" },
-                  { name: "SIR Backend",   tag: "dev" },
-                  { name: "Reporteador",   tag: "dev" },
-                  { name: "RETYS",         tag: "dev" },
-                ],
-                note: "Python + Django actualizados. Primer paso Plan de Salida Jalisco",
-              },
-              {
-                label: "REPUVE", sublabel: "Ambiente independiente",
-                dot: "#a78bfa", glow: "#7c3aed", border: "#7c3aed30",
-                topLine: "#7c3aed",
-                systems: [
-                  { name: "Portal de citas", tag: "dev" },
-                  { name: "RETYS",           tag: "dev" },
-                  { name: "BD pruebas",      tag: "qa" },
-                ],
-                note: "Refactorización de seguridad activa: login, captcha, rate limit",
+                note: "WAF + DNS configurados por SIGOB. Infraestructura propia del cliente, aparte del resto",
               },
             ].map(node => (
               <div key={node.label} style={{
@@ -1105,176 +1099,40 @@ export default function HomePage({ focusItems, onFocusUpdate, onFocusAdd, onFocu
         </div>
       </div>
 
-      {/* ── ESTADO DE PROYECTOS ─────────────────────────────────────────── */}
+      {/* ── TAREAS A NO PERDER DE VISTA (en vivo) ───────────────────────── */}
       <div style={section(20)}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <div style={sectionLabel(T.text2)}>
-            <span style={{ width: 3, height: 14, background: T.text2, borderRadius: 2, display: "inline-block" }} />
-            Estado de Proyectos
-          </div>
-          <div style={{ display: "flex", gap: 5 }}>
-            {(["all","blocked","active","done"] as const).map(k => {
-              const labels = { all:"Todos", blocked:"Bloqueados", active:"En curso", done:"Completados" };
-              const on = filter === k;
-              return (
-                <button key={k} onClick={() => setFilter(k)} style={{
-                  background: on ? T.hover : "transparent",
-                  border: `1px solid ${on ? T.gold : T.border}`,
-                  borderRadius: 8, color: on ? T.gold : T.text2,
-                  cursor: "pointer", fontSize: 10, padding: "4px 12px",
-                  fontFamily: "inherit", fontWeight: on ? 700 : 400,
-                  transition: "all 0.15s",
-                }}>
-                  {labels[k]}
-                </button>
-              );
-            })}
-          </div>
+        <div style={sectionLabel(T.gold)}>
+          <span style={{ width: 3, height: 14, background: T.gold, borderRadius: 2, display: "inline-block" }} />
+          Tareas a no perder de vista
         </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 22 }}>
 
-        {/* header col */}
-        <div style={{
-          display: "grid", gridTemplateColumns: "1fr 100px 100px 44px 44px 44px 24px",
-          gap: 6, padding: "0 12px 8px",
-          borderBottom: `1px solid ${T.border}`,
-          fontSize: 9, color: T.text3, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
-        }}>
-          <span>Proyecto</span>
-          <span>Estado</span>
-          <span>Criticidad</span>
-          <span style={{ textAlign:"center", color:"#ef4444" }}>Bloq</span>
-          <span style={{ textAlign:"center", color:"#60A5FA" }}>Act</span>
-          <span style={{ textAlign:"center", color:"#4ADE80" }}>Ok</span>
-          <span />
-        </div>
-
-        {filtered.map(p => {
-          const isOpen = expanded.has(p.id);
-          const byCellMap: Record<string, Task[]> = {};
-          p.tasks.forEach(t => {
-            if (!byCellMap[t.cell]) byCellMap[t.cell] = [];
-            byCellMap[t.cell].push(t);
-          });
-
-          return (
-            <div key={p.id}>
-              <button onClick={() => toggle(p.id)} style={{
-                display:"grid", gridTemplateColumns:"1fr 100px 100px 44px 44px 44px 24px",
-                gap:6, width:"100%", padding:"11px 12px",
-                background: p.bloqueadas > 0 ? "rgba(239,68,68,0.03)" : "transparent",
-                border:"none", borderBottom:`1px solid ${T.surface}`,
-                cursor:"pointer", alignItems:"center", textAlign:"left",
-                fontFamily:"inherit", transition:"background 0.15s",
-              }}>
-                <span style={{ fontSize:12, color:T.text1, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                  {p.name}
-                </span>
-                <span style={{ fontSize:10, color:ESTADO_COLOR[p.estado], fontWeight:500 }}>
-                  {ESTADO_LABEL[p.estado]}
-                </span>
-                <span style={{ display:"flex", alignItems:"center", gap:5 }}>
-                  <span style={{ width:6, height:6, borderRadius:"50%", background:CRIT_COLOR[p.criticality], flexShrink:0, display:"inline-block", boxShadow:`0 0 5px ${CRIT_COLOR[p.criticality]}` }} />
-                  <span style={{ fontSize:10, color:CRIT_COLOR[p.criticality], fontWeight:700 }}>{p.criticality}</span>
-                </span>
-                <span style={{ fontSize:13, textAlign:"center", color:p.bloqueadas>0?"#ef4444":T.text3, fontWeight:p.bloqueadas>0?800:400 }}>
-                  {p.bloqueadas||"—"}
-                </span>
-                <span style={{ fontSize:13, textAlign:"center", color:p.activas>0?"#60A5FA":T.text3 }}>
-                  {p.activas||"—"}
-                </span>
-                <span style={{ fontSize:13, textAlign:"center", color:p.completadas>0?"#4ADE80":T.text3 }}>
-                  {p.completadas||"—"}
-                </span>
-                <span style={{ fontSize:10, color:T.text3, textAlign:"center" }}>{isOpen?"▲":"▼"}</span>
-              </button>
-
-              {isOpen && (
-                <div style={{ background:T.surface, borderBottom:`1px solid ${T.border}`, padding:"14px 16px" }}>
-                  {p.tasks.length === 0 ? (
-                    <div style={{ fontSize:11, color:T.text3 }}>Sin tareas registradas.</div>
-                  ) : (
-                    Object.entries(byCellMap).map(([cell, tasks]) => {
-                      const cc   = CELL_CLR[cell] ?? T.text3;
-                      const bloq = tasks.filter(t => BLOCKED.includes(t.status)).length;
-                      const act  = tasks.filter(t => ACTIVE.includes(t.status)).length;
-                      const dn   = tasks.filter(t => DONE.includes(t.status)).length;
-                      return (
-                        <div key={cell} style={{ marginBottom:14 }}>
-                          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6 }}>
-                            <span style={{ width:6, height:6, borderRadius:"50%", background:cc, flexShrink:0, display:"inline-block" }} />
-                            <span style={{ fontSize:9, fontWeight:800, color:cc, letterSpacing:"0.1em", textTransform:"uppercase" }}>{cell}</span>
-                            <span style={{ fontSize:9, color:T.text3 }}>{tasks.length} tareas</span>
-                            {bloq>0 && <span style={{ fontSize:9, color:"#ef4444" }}>{bloq} bloq.</span>}
-                            {act >0 && <span style={{ fontSize:9, color:"#60A5FA" }}>{act} activas</span>}
-                            {dn  >0 && <span style={{ fontSize:9, color:"#4ADE80" }}>{dn} ok</span>}
-                          </div>
-                          {tasks.map(task => (
-                            <div key={task.id} style={{
-                              display:"flex", alignItems:"center", gap:8,
-                              padding:"7px 10px", marginBottom:3,
-                              background: T.card, borderRadius:8,
-                              border:`1px solid ${BLOCKED.includes(task.status)?"rgba(239,68,68,0.2)":T.border}`,
-                            }}>
-                              <StatusBadge status={task.status} />
-                              <span style={{ flex:1, fontSize:11, color:T.text1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                                {task.title}
-                              </span>
-                              <span style={{ fontSize:10, color:T.text2, whiteSpace:"nowrap", flexShrink:0 }}>
-                                {task.resp}
-                              </span>
-                              {task.zoho && (
-                                <a href={task.zoho} target="_blank" rel="noopener noreferrer"
-                                  onClick={e => e.stopPropagation()}
-                                  style={{ fontSize:9, color:"#60A5FA", background:"rgba(96,165,250,0.1)", border:"1px solid rgba(96,165,250,0.2)", padding:"2px 7px", borderRadius:20, textDecoration:"none", flexShrink:0 }}>
-                                  Zoho ↗
-                                </a>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              )}
+          {/* Esta semana */}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#a16207", display: "inline-block" }} />
+              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "#d4a017" }}>Esta semana</span>
+              <span style={{ fontSize: 10, color: T.text3 }}>{weekTasks.length}</span>
             </div>
-          );
-        })}
+            {weekTasks.length === 0
+              ? <div style={{ fontSize: 11, color: T.text3, padding: "8px 0" }}>Sin tareas marcadas para esta semana.</div>
+              : weekTasks.map(taskRow)}
+          </div>
 
-        {filtered.length === 0 && (
-          <div style={{ color:T.text3, fontSize:12, textAlign:"center", padding:"32px 0" }}>
-            Sin proyectos que coincidan con el filtro.
+          {/* Urgentes / Alta prioridad / Importantes */}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
+              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "#f87171" }}>Urgentes · Alta prioridad · Importantes</span>
+              <span style={{ fontSize: 10, color: T.text3 }}>{prioTasks.length}</span>
+            </div>
+            {prioTasks.length === 0
+              ? <div style={{ fontSize: 11, color: T.text3, padding: "8px 0" }}>Sin tareas urgentes ni prioritarias.</div>
+              : prioTasks.map(taskRow)}
           </div>
-        )}
-      </div>
 
-      {/* ── RIESGOS ACTIVOS ─────────────────────────────────────────────── */}
-      {topRisks.length > 0 && (
-        <div style={section(0)}>
-          <div style={sectionLabel("#f87171")}>
-            <span style={{ width:3, height:14, background:"#ef4444", borderRadius:2, display:"inline-block" }} />
-            Riesgos Activos — Urgente / Bloqueado
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-            {topRisks.map((t,i) => (
-              <div key={i} style={{
-                display:"flex", alignItems:"center", gap:10, padding:"9px 12px",
-                background:T.surface, borderRadius:10,
-                border:`1px solid rgba(239,68,68,0.2)`,
-              }}>
-                <StatusBadge status={t.status} />
-                <span style={{ flex:1, fontSize:12, color:T.text1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                  {t.title}
-                </span>
-                <span style={{ fontSize:10, color:T.text2, whiteSpace:"nowrap", flexShrink:0 }}>{t.resp}</span>
-                <span style={{ fontSize:9, color:T.text3, background:T.hover, padding:"2px 8px", borderRadius:20, border:`1px solid ${T.border}`, whiteSpace:"nowrap", flexShrink:0 }}>
-                  {t.cell}
-                </span>
-              </div>
-            ))}
-          </div>
         </div>
-      )}
+      </div>
 
     </div>
   );
