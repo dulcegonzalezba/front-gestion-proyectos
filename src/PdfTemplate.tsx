@@ -689,14 +689,17 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
         </View>
 
         {/* ── 6b. Avance respecto al checkpoint anterior ─────────────── */}
-        {compHasData && (
+        {comp && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Avance respecto al checkpoint anterior</Text>
             <Text style={styles.sectionIntro}>
-              {comp!.prev
-                ? `Cambios desde ${comp!.prev.week} (${semanaLabel(comp!.prev.isoWeek)}).`
+              {comp.prev
+                ? `Cambios desde ${comp.prev.week} (${semanaLabel(comp.prev.isoWeek)}).`
                 : 'Cambios desde el checkpoint anterior.'}
             </Text>
+            {!compHasData && (
+              <Text style={styles.emptyNote}>Sin cambios respecto al checkpoint anterior.</Text>
+            )}
             {/* KPIs del avance */}
             <View style={styles.miniKpiRow}>
               <View style={[styles.miniKpi, { borderLeftColor: '#15803d' }]}>

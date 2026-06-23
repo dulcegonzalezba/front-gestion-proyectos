@@ -941,14 +941,16 @@ export default function App() {
         const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
         const listRes = await fetch('/api/snapshots', { headers });
         const list: any[] = listRes.ok ? await listRes.json() : []; // ordenada DESC por savedAt
-        let prevMeta: any = null;
+        // El "checkpoint anterior" real: el más reciente de una SEMANA distinta y no posterior al actual.
+        // (Evita comparar contra un checkpoint de la misma semana recién guardado, que daría 0 cambios.)
         const curId = (snap as any).id;
-        if (curId != null) {
-          const idx = list.findIndex(s => s.id === curId);
-          prevMeta = idx >= 0 ? list[idx + 1] : list.find(s => s.savedAt < snap.savedAt);
-        } else {
-          prevMeta = list[0]; // datos en vivo → checkpoint más reciente
-        }
+        const curIso = snap.isoWeek;
+        const curSavedAt = snap.savedAt;
+        const prevMeta: any =
+          list.find(s => s.id !== curId && s.isoWeek !== curIso && s.savedAt <= curSavedAt)
+          // Respaldo: si solo hay checkpoints de la misma semana, usa el inmediatamente anterior.
+          ?? list.find(s => s.id !== curId && s.savedAt < curSavedAt)
+          ?? null;
         if (prevMeta) {
           const prevRes = await fetch(`/api/snapshots/${prevMeta.id}`, { headers });
           if (prevRes.ok) {
