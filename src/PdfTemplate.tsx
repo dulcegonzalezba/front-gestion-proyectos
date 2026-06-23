@@ -62,7 +62,33 @@ type SnapAcuerdo = {
   dueWeek?: string;
   status: string;          // PENDIENTE | CUMPLIDO | INCUMPLIDO | PARCIAL
   celulaName?: string;
+  projectId?: string;
   notes?: string;
+};
+
+type SnapProject = {
+  id: string;
+  name: string;
+  taskRefs?: { taskId: string; cellName: string }[];
+};
+
+// Una tarea dentro de la comparativa: lleva su estado anterior para mostrar "antes → después".
+type CompTask = {
+  id?: string;
+  title: string;
+  resp?: string;
+  status: string;
+  cell?: string;
+  fromStatus?: string;
+};
+
+type Comparison = {
+  prev?: { week: string; isoWeek: string; savedAt: string };
+  summary: { completadas: number; avances: number; nuevas: number; regresiones: number };
+  completadas: CompTask[];
+  avances: CompTask[];
+  nuevas: CompTask[];
+  regresiones: CompTask[];
 };
 
 export type CheckpointSnap = {
@@ -79,6 +105,8 @@ export type CheckpointSnap = {
   pmo: SnapPmoItem[];
   checklist: ChecklistItem[];
   acuerdos?: SnapAcuerdo[];
+  projects?: SnapProject[];
+  comparison?: Comparison | null;
 };
 
 // ── Status helpers ─────────────────────────────────────────────────────────
@@ -386,6 +414,38 @@ const styles = StyleSheet.create({
     color: '#9C8B72',
     marginBottom: 6,
   },
+  // Mini-KPIs (resumen de acuerdos y comparativa) — más compactos que los KPIs del header
+  miniKpiRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 9,
+  },
+  miniKpi: {
+    flex: 1,
+    backgroundColor: '#F5F0E8',
+    borderRadius: 3,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderLeftWidth: 3,
+  },
+  miniKpiValue: {
+    fontSize: 15,
+    fontFamily: 'Helvetica-Bold',
+    color: '#3D2412',
+  },
+  miniKpiLabel: {
+    fontSize: 6.5,
+    color: '#6B5540',
+    marginTop: 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  // Línea compacta para listados de comparativa (antes → después)
+  compArrow: {
+    color: '#3D2412',
+    fontSize: 8,
+    fontFamily: 'Helvetica-Bold',
+  },
   // Footer
   footer: {
     position: 'absolute',
@@ -433,6 +493,21 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
     .slice()
     .sort((a, b) => ACUERDO_ORDER.indexOf(a.status) - ACUERDO_ORDER.indexOf(b.status));
 
+  // Conteo de acuerdos por estado (para los KPIs de la sección)
+  const acuerdoCounts: Record<string, number> = { INCUMPLIDO: 0, PENDIENTE: 0, PARCIAL: 0, CUMPLIDO: 0 };
+  acuerdos.forEach(a => { if (acuerdoCounts[a.status] !== undefined) acuerdoCounts[a.status]++; });
+
+  // ── Proyectos: mapas para resolver el proyecto de cada tarea / acuerdo ──
+  const projects = snap.projects || [];
+  const projectByTask: Record<string, string> = {};
+  projects.forEach(p => (p.taskRefs || []).forEach(r => { if (r.taskId) projectByTask[r.taskId] = p.name; }));
+  const projectById: Record<string, string> = {};
+  projects.forEach(p => { projectById[p.id] = p.name; });
+
+  // ── Comparativa contra el checkpoint anterior ──
+  const comp = snap.comparison || null;
+  const compHasData = !!comp && (comp.completadas.length + comp.avances.length + comp.nuevas.length + comp.regresiones.length) > 0;
+
   // ── KPIs ──
   const kpiEnfoques = activeFocus.length;
   const kpiPrio     = prioritized.length;
@@ -450,6 +525,8 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
   const taskCard = (t: { id?: string; title: string; resp: string; status: string; cell?: string; notes?: string }, key: number) => {
     const s = sev(t.status);
     const note = (t.notes || '').trim();
+    const proj = t.id ? projectByTask[t.id] : undefined;
+    const meta = [t.resp || 'Sin responsable', t.cell, proj].filter(Boolean).join('  ·  ');
     return (
       <View key={key} style={[styles.cardRow, { borderLeftColor: SEV_ACCENT[s] }]} wrap={false}>
         <View style={{ flex: 1 }}>
@@ -459,8 +536,29 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
               {label(t.status)}
             </Text>
           </View>
-          <Text style={styles.itemMeta}>{t.resp || 'Sin responsable'}{t.cell ? ` · ${t.cell}` : ''}</Text>
+          <Text style={styles.itemMeta}>{meta}</Text>
           {note.length > 0 && <Text style={styles.itemNote}>{note.substring(0, 220)}</Text>}
+        </View>
+      </View>
+    );
+  };
+
+  // ── Línea compacta para los listados de la comparativa ──
+  // showArrow = true muestra "Estado anterior → Estado actual"; si no, solo el estado actual.
+  const compLine = (t: CompTask, key: number, showArrow: boolean) => {
+    const proj = t.id ? projectByTask[t.id] : undefined;
+    const metaTail = [t.cell, proj].filter(Boolean).join('  ·  ');
+    return (
+      <View key={key} style={styles.itemRow} wrap={false}>
+        <Text style={styles.bullet}>•</Text>
+        <View style={styles.itemContent}>
+          <Text style={styles.itemTitle}>{t.title.substring(0, 90)}</Text>
+          <Text style={styles.itemMeta}>
+            {showArrow && t.fromStatus
+              ? `${label(t.fromStatus)} → ${label(t.status)}`
+              : label(t.status)}
+            {metaTail ? `  ·  ${metaTail}` : ''}
+          </Text>
         </View>
       </View>
     );
@@ -536,31 +634,115 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
           <Text style={styles.sectionIntro}>Compromisos del equipo y su estado de cumplimiento.</Text>
           {acuerdos.length === 0
             ? <Text style={styles.emptyNote}>Sin acuerdos registrados.</Text>
-            : acuerdos.map((a, i) => {
-                const s = acuerdoSev(a.status);
-                const tagStyle = s === 'red' ? styles.tagUrgent
-                  : s === 'green' ? styles.tagDone
-                  : s === 'gold' ? styles.tagGold : styles.tagGray;
-                const meta = [
-                  a.resp || 'Sin responsable',
-                  a.celulaName,
-                  a.committedWeek ? `comprometido ${semanaLabel(a.committedWeek)}${a.dueWeek ? ` → ${semanaLabel(a.dueWeek)}` : ''}` : '',
-                ].filter(Boolean).join('  ·  ');
-                const note = (a.notes || '').trim();
-                return (
-                  <View key={a.id || i} style={[styles.cardRow, { borderLeftColor: ACUERDO_ACCENT[s] }]} wrap={false}>
-                    <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-                        <Text style={styles.itemTitle}>{a.title.substring(0, 95)}</Text>
-                        <Text style={tagStyle}>{ACUERDO_LABEL[a.status] ?? a.status}</Text>
+            : (() => {
+                const renderAcuerdo = (a: SnapAcuerdo, i: number) => {
+                  const s = acuerdoSev(a.status);
+                  const tagStyle = s === 'red' ? styles.tagUrgent
+                    : s === 'green' ? styles.tagDone
+                    : s === 'gold' ? styles.tagGold : styles.tagGray;
+                  const proj = a.projectId ? projectById[a.projectId] : undefined;
+                  const meta = [
+                    a.resp || 'Sin responsable',
+                    a.celulaName,
+                    proj,
+                    a.committedWeek ? `comprometido ${semanaLabel(a.committedWeek)}${a.dueWeek ? ` → ${semanaLabel(a.dueWeek)}` : ''}` : '',
+                  ].filter(Boolean).join('  ·  ');
+                  const note = (a.notes || '').trim();
+                  return (
+                    <View key={a.id || i} style={[styles.cardRow, { borderLeftColor: ACUERDO_ACCENT[s] }]} wrap={false}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                          <Text style={styles.itemTitle}>{a.title.substring(0, 95)}</Text>
+                          <Text style={tagStyle}>{ACUERDO_LABEL[a.status] ?? a.status}</Text>
+                        </View>
+                        <Text style={styles.itemMeta}>{meta}</Text>
+                        {note.length > 0 && <Text style={styles.itemNote}>{note.substring(0, 220)}</Text>}
                       </View>
-                      <Text style={styles.itemMeta}>{meta}</Text>
-                      {note.length > 0 && <Text style={styles.itemNote}>{note.substring(0, 220)}</Text>}
                     </View>
-                  </View>
+                  );
+                };
+                return (
+                  <>
+                    {/* Resumen por estado */}
+                    <View style={styles.miniKpiRow}>
+                      {ACUERDO_ORDER.map(st => (
+                        <View key={st} style={[styles.miniKpi, { borderLeftColor: ACUERDO_ACCENT[acuerdoSev(st)] }]}>
+                          <Text style={styles.miniKpiValue}>{acuerdoCounts[st]}</Text>
+                          <Text style={styles.miniKpiLabel}>{ACUERDO_LABEL[st]}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    {/* Agrupados por estado (atención primero) */}
+                    {ACUERDO_ORDER.map(st => {
+                      const grupo = acuerdos.filter(a => a.status === st);
+                      if (grupo.length === 0) return null;
+                      return (
+                        <View key={st}>
+                          <Text style={styles.cellSubHeader}>{ACUERDO_LABEL[st]} · {grupo.length}</Text>
+                          {grupo.map((a, i) => renderAcuerdo(a, i))}
+                        </View>
+                      );
+                    })}
+                  </>
                 );
-              })}
+              })()}
         </View>
+
+        {/* ── 6b. Avance respecto al checkpoint anterior ─────────────── */}
+        {compHasData && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Avance respecto al checkpoint anterior</Text>
+            <Text style={styles.sectionIntro}>
+              {comp!.prev
+                ? `Cambios desde ${comp!.prev.week} (${semanaLabel(comp!.prev.isoWeek)}).`
+                : 'Cambios desde el checkpoint anterior.'}
+            </Text>
+            {/* KPIs del avance */}
+            <View style={styles.miniKpiRow}>
+              <View style={[styles.miniKpi, { borderLeftColor: '#15803d' }]}>
+                <Text style={styles.miniKpiValue}>{comp!.summary.completadas}</Text>
+                <Text style={styles.miniKpiLabel}>Completadas</Text>
+              </View>
+              <View style={[styles.miniKpi, { borderLeftColor: '#1d4ed8' }]}>
+                <Text style={styles.miniKpiValue}>{comp!.summary.avances}</Text>
+                <Text style={styles.miniKpiLabel}>Avanzaron</Text>
+              </View>
+              <View style={[styles.miniKpi, { borderLeftColor: '#C9A84C' }]}>
+                <Text style={styles.miniKpiValue}>{comp!.summary.nuevas}</Text>
+                <Text style={styles.miniKpiLabel}>Nuevas</Text>
+              </View>
+              <View style={[styles.miniKpi, { borderLeftColor: '#b91c1c' }]}>
+                <Text style={styles.miniKpiValue}>{comp!.summary.regresiones}</Text>
+                <Text style={styles.miniKpiLabel}>En regresión</Text>
+              </View>
+            </View>
+            {/* Detalle por tarea */}
+            {comp!.completadas.length > 0 && (
+              <View>
+                <Text style={styles.cellSubHeader}>Completadas · {comp!.completadas.length}</Text>
+                {comp!.completadas.map((t, i) => compLine(t, i, true))}
+              </View>
+            )}
+            {comp!.avances.length > 0 && (
+              <View>
+                <Text style={styles.cellSubHeader}>Avanzaron · {comp!.avances.length}</Text>
+                {comp!.avances.map((t, i) => compLine(t, i, true))}
+              </View>
+            )}
+            {comp!.nuevas.length > 0 && (
+              <View>
+                <Text style={styles.cellSubHeader}>Nuevas · {comp!.nuevas.length}</Text>
+                {comp!.nuevas.map((t, i) => compLine(t, i, false))}
+              </View>
+            )}
+            {comp!.regresiones.length > 0 && (
+              <View>
+                <Text style={styles.cellSubHeader}>En regresión · {comp!.regresiones.length}</Text>
+                {comp!.regresiones.map((t, i) => compLine(t, i, true))}
+              </View>
+            )}
+          </View>
+        )}
 
         {/* ── 7. Carga por Célula ────────────────────────────────────── */}
         <View style={styles.section}>

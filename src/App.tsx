@@ -933,7 +933,33 @@ export default function App() {
           if (res.ok) acuerdos = await res.json();
         } catch { /* sin acuerdos si falla la red */ }
       }
-      const snapForPdf = { ...snap, acuerdos: acuerdos || [] };
+      // Comparativa contra el checkpoint anterior (por id si es un checkpoint guardado,
+      // contra el más reciente si se genera con datos en vivo).
+      let comparison = null;
+      try {
+        const token = getToken();
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+        const listRes = await fetch('/api/snapshots', { headers });
+        const list: any[] = listRes.ok ? await listRes.json() : []; // ordenada DESC por savedAt
+        let prevMeta: any = null;
+        const curId = (snap as any).id;
+        if (curId != null) {
+          const idx = list.findIndex(s => s.id === curId);
+          prevMeta = idx >= 0 ? list[idx + 1] : list.find(s => s.savedAt < snap.savedAt);
+        } else {
+          prevMeta = list[0]; // datos en vivo → checkpoint más reciente
+        }
+        if (prevMeta) {
+          const prevRes = await fetch(`/api/snapshots/${prevMeta.id}`, { headers });
+          if (prevRes.ok) {
+            const prevSnap = await prevRes.json();
+            const cmp = buildCheckpointComparison(prevSnap.data, snap.data);
+            if (cmp) comparison = { ...cmp, prev: { week: prevSnap.week, isoWeek: prevSnap.isoWeek, savedAt: prevSnap.savedAt } };
+          }
+        }
+      } catch { /* sin comparativa si falla la red */ }
+
+      const snapForPdf = { ...snap, acuerdos: acuerdos || [], projects, comparison };
       const blob = await pdf(<PdfTemplate snap={snapForPdf} />).toBlob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -971,6 +997,44 @@ export default function App() {
       if (BLOCKED.includes(t.status)) bloqueadas++;
     });
     return { completadas, enProgreso, bloqueadas };
+  };
+
+  // Compara dos snapshots por id de tarea y clasifica completadas / avances / nuevas / regresiones.
+  // Usa los códigos de estado reales de la app (no las etiquetas del endpoint /compare del backend).
+  const buildCheckpointComparison = (prevData: any, currData: any) => {
+    if (!prevData || !currData) return null;
+    const DONE = ["COMPLETADO", "LISTO_PROD", "ARCHIVADO"];
+    const progressRank = (s: string) => {
+      if (DONE.includes(s)) return 3;
+      if (["EN_CURSO", "ACTIVO", "SEGUIMIENTO", "COORDINADO"].includes(s)) return 2;
+      if (["ESTA_SEMANA", "ALTA_PRIORIDAD", "REVISAR", "BANDERA_AMARILLA"].includes(s)) return 1;
+      return 0; // pendiente / urgente / bloqueado / sin iniciar
+    };
+    const flatten = (data: any) =>
+      Object.entries(data?.cells || {}).flatMap(([cellName, c]: any) =>
+        (c.tasks || []).map((t: any) => ({ ...t, cell: cellName }))
+      );
+    const prevMap = new Map(flatten(prevData).map((t: any) => [t.id, t]));
+
+    const completadas: any[] = [], avances: any[] = [], regresiones: any[] = [], nuevas: any[] = [];
+    flatten(currData).forEach((t: any) => {
+      const before: any = prevMap.get(t.id);
+      if (!before) { nuevas.push(t); return; }
+      if (DONE.includes(t.status) && !DONE.includes(before.status)) {
+        completadas.push({ ...t, fromStatus: before.status });
+      } else {
+        const ra = progressRank(t.status), rb = progressRank(before.status);
+        if (ra > rb) avances.push({ ...t, fromStatus: before.status });
+        else if (ra < rb) regresiones.push({ ...t, fromStatus: before.status });
+      }
+    });
+    return {
+      summary: {
+        completadas: completadas.length, avances: avances.length,
+        nuevas: nuevas.length, regresiones: regresiones.length,
+      },
+      completadas, avances, nuevas, regresiones,
+    };
   };
 
   const addPmoItem = () => {
