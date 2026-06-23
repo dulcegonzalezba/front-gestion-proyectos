@@ -3451,6 +3451,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
         <main style={{ flex: 1, overflowY: "auto", background: "#09090C" }}>
           <HomePage
             focusItems={d?.focus}
+            week={d?.week}
             tasks={Object.entries(d?.cells || {}).flatMap(([cell, c]: [string, any]) => ((c?.tasks || []) as any[]).map(t => ({ ...t, cell })))}
             onFocusUpdate={(id, updates) => d && save({ ...d, focus: d.focus.map(x => x.id === id ? { ...x, ...updates } : x) })}
             onFocusAdd={() => d && save({ ...d, focus: [...d.focus, { id: "F" + Date.now(), title: "Nuevo enfoque", resp: "", cell: "", status: "ESTA_SEMANA", notes: "" }] })}

@@ -114,7 +114,6 @@ const DONE        = ['COMPLETADO', 'LISTO_PROD', 'ARCHIVADO'];
 // Buckets alineados con el panel de Inicio (nada estático)
 const WEEK        = ['ESTA_SEMANA'];
 const PRIORITY    = ['URGENTE', 'BLOQUEANTE', 'BLOQUEADO', 'PRIORITARIO', 'IMPORTANTE', 'ALTA_PRIORIDAD'];
-const IN_PROGRESS = ['EN_CURSO', 'ACTIVO', 'SEGUIMIENTO', 'COORDINADO'];
 const ACTIVE      = ['ACTIVO', 'EN_CURSO', 'SEGUIMIENTO', 'ESTA_SEMANA', 'COORDINADO', 'ALTA_PRIORIDAD'];
 
 // Etiquetas legibles para directivos (en vez del código crudo del estado)
@@ -512,7 +511,6 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
   const kpiEnfoques = activeFocus.length;
   const kpiPrio     = prioritized.length;
   const kpiSemana   = weekTasks.length;
-  const kpiCurso    = allTasks.filter(t => IN_PROGRESS.includes(t.status)).length;
 
   const generatedDate = new Date(snap.savedAt).toLocaleDateString('es-MX', {
     weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
@@ -594,10 +592,6 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
           <View style={[styles.kpi, { borderLeftColor: '#a16207' }]}>
             <Text style={styles.kpiValue}>{kpiSemana}</Text>
             <Text style={styles.kpiLabel}>Esta semana</Text>
-          </View>
-          <View style={[styles.kpi, { borderLeftColor: '#1d4ed8' }]}>
-            <Text style={styles.kpiValue}>{kpiCurso}</Text>
-            <Text style={styles.kpiLabel}>En curso</Text>
           </View>
         </View>
 

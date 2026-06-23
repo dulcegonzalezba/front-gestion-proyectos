@@ -83,7 +83,6 @@ const WEEK_STATUSES     = ["ESTA_SEMANA"];
 // Tareas que NO debemos perder de vista (ordenadas por severidad)
 const PRIORITY_STATUSES = ["URGENTE", "BLOQUEANTE", "BLOQUEADO", "PRIORITARIO", "IMPORTANTE", "ALTA_PRIORIDAD"];
 // En curso (sin solaparse con las dos categorías anteriores)
-const IN_PROGRESS       = ["EN_CURSO", "ACTIVO", "SEGUIMIENTO", "COORDINADO"];
 
 // ── TASK FACTORY ──────────────────────────────────────────────────────────────
 const tk = (
@@ -526,9 +525,12 @@ const TAG_CLR: Record<string, { bg: string; color: string }> = {
 const HUAWEI_STEPS = [
   { id: "h1", orden: 1, sistema: "Navojoa",          done: true, detalle: "Apagado. SIR + Egresos + OOMAPAS migrados a Curiosity y estables. ✓ Listo." },
   { id: "h2", orden: 2, sistema: "SEIGPOL",          detalle: "Siguiente en salir. Verificar que no haya dependencias activas antes de dar de baja." },
-  { id: "h3", orden: 3, sistema: "REPUVE",           detalle: "Apagar tras confirmar el ambiente independiente de REPUVE estable en el nuevo servidor." },
-  { id: "h4", orden: 4, sistema: "Oaxaca Municipio", detalle: "Apagar instancia de Oaxaca Municipio (SIR / MultApp) en Huawei. Confirmar DNS apuntando al nuevo servidor." },
-  { id: "h5", orden: 5, sistema: "Nayarit",          detalle: "Último en salir. Confirmar estabilidad del Plan de Estabilización antes de apagar en Huawei." },
+  { id: "h-cfdi",    orden: 3, sistema: "CFDI",                 detalle: "Migrar CFDI a Curiosity antes de continuar con el apagado en Huawei." },
+  { id: "h-autopac", orden: 4, sistema: "AUTOPAC",              detalle: "Migrar AUTOPAC a Curiosity. Confirmar URLs de timbrado y pase a producción." },
+  { id: "h-concil",  orden: 5, sistema: "Conciliación Bancaria", detalle: "Migrar Conciliación Bancaria a Curiosity y validar antes de dar de baja en Huawei." },
+  { id: "h3", orden: 6, sistema: "REPUVE",           detalle: "Apagar tras confirmar el ambiente independiente de REPUVE estable en el nuevo servidor." },
+  { id: "h4", orden: 7, sistema: "Oaxaca Municipio", detalle: "Apagar instancia de Oaxaca Municipio (SIR / MultApp) en Huawei. Confirmar DNS apuntando al nuevo servidor." },
+  { id: "h5", orden: 8, sistema: "Nayarit",          detalle: "Último en salir. Confirmar estabilidad del Plan de Estabilización antes de apagar en Huawei." },
 ];
 
 const STORAGE_KEY = "huawei_exit_plan_done_v2";
@@ -546,6 +548,7 @@ function loadHuaweiDone(): Set<string> {
 interface HomePageProps {
   focusItems?: FocusItem[];
   tasks?: Task[];
+  week?: string;
   onFocusUpdate?: (id: string, updates: Partial<FocusItem>) => void;
   onFocusAdd?: () => void;
   onFocusDelete?: (id: string) => void;
@@ -553,7 +556,7 @@ interface HomePageProps {
 
 const FOCUS_CELLS = ["DBA", "DevOps", "Backend SIR", "Frontend SIR", "Nuevas Tec", "Reporteador Nayarit", "Multi-celula"];
 
-export default function HomePage({ focusItems, tasks, onFocusUpdate, onFocusAdd, onFocusDelete }: HomePageProps = {}) {
+export default function HomePage({ focusItems, tasks, week, onFocusUpdate, onFocusAdd, onFocusDelete }: HomePageProps = {}) {
   const [huaweiDone, setHuaweiDone] = useState<Set<string>>(loadHuaweiDone);
   const [editFocusId, setEditFocusId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<FocusItem>>({});
@@ -577,7 +580,6 @@ export default function HomePage({ focusItems, tasks, onFocusUpdate, onFocusAdd,
     .sort((a, b) => PRIORITY_STATUSES.indexOf(a.status) - PRIORITY_STATUSES.indexOf(b.status));
 
   // KPIs en vivo
-  const kpiEnCurso = liveTasks.filter(t => IN_PROGRESS.includes(t.status)).length;
   const kpiDone    = liveTasks.filter(t => DONE.includes(t.status)).length;
 
   // ── helpers de estilo ─────────────────────────────────────────────────────
@@ -637,7 +639,7 @@ export default function HomePage({ focusItems, tasks, onFocusUpdate, onFocusAdd,
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 12, color: T.gold, fontWeight: 600, marginBottom: 2 }}>
-            Semana 27 Abr — 2 May 2026
+            {week ? `Semana ${week}` : "Semana en curso"}
           </div>
           <div style={{ fontSize: 10, color: T.text3 }}>
             {liveTasks.length} tareas en seguimiento · {weekTasks.length + prioTasks.length} a no perder de vista
@@ -646,10 +648,9 @@ export default function HomePage({ focusItems, tasks, onFocusUpdate, onFocusAdd,
       </div>
 
       {/* ── KPIs ────────────────────────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 28 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 28 }}>
         <KpiCard label="Esta semana"             value={weekTasks.length} color={T.gold}  />
         <KpiCard label="Urgentes / prioritarias" value={prioTasks.length} color="#ef4444" />
-        <KpiCard label="En curso"                value={kpiEnCurso}       color="#60A5FA" />
         <KpiCard label="Completadas"             value={kpiDone}          color="#4ADE80" />
       </div>
 
