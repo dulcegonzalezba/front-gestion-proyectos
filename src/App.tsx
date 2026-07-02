@@ -1,7 +1,7 @@
 import { storage } from "./storage";
 import { useState, useEffect, useRef, CSSProperties } from "react";
 import { useNavigate } from 'react-router-dom';
-import { clearToken, getToken } from './auth';
+import { clearToken, getToken, getRole } from './auth';
 import { toast } from 'sonner';
 import { pdf } from '@react-pdf/renderer';
 import AppHeader from './AppHeader';
@@ -10,6 +10,8 @@ import DashboardTab from './DashboardTab';
 import SplitLayout from './SplitLayout';
 import HomePage from './HomePage';
 import AcuerdosTab from './AcuerdosTab';
+import LiberacionesTab from './LiberacionesTab';
+import PersonalTab from './PersonalTab';
 import CheckpointTimeline from './CheckpointTimeline';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 
@@ -427,6 +429,12 @@ export default function App() {
   const [checkpointList, setCheckpointList]             = useState<{ id: number; isoWeek: string; week: string; savedAt: string }[]>([]);
   const [acuerdosFilterWeek, setAcuerdosFilterWeek]     = useState("");
   const [acuerdosFilterStatus, setAcuerdosFilterStatus] = useState("Todos");
+  const [userRole]                                      = useState<string | null>(getRole());
+  const [libFilterProject, setLibFilterProject]         = useState("Todos");
+  const [libFilterStatus, setLibFilterStatus]           = useState("Todos");
+  const [personalFilterCelula, setPersonalFilterCelula] = useState("Todos");
+  const [personalFilterTipo, setPersonalFilterTipo]     = useState("Todos");
+  const [personalView, setPersonalView]                 = useState<"personas" | "carga">("personas");
 
   useEffect(() => { load(); }, []);
   useEffect(() => { loadProjects(); }, []);
@@ -3396,6 +3404,45 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
       );
     }
 
+    if (tab === "liberaciones") {
+      const statusOptions = ["Todos", "EXITOSA", "CON_ERRORES", "EN_PROGRESO", "REVERTIDA"];
+      const statusLabels: Record<string, string> = { Todos:"Todos", EXITOSA:"Exitosa", CON_ERRORES:"Con errores", EN_PROGRESO:"En progreso", REVERTIDA:"Revertida" };
+      return (
+        <div>
+          <div style={{ padding: "12px 16px 4px", fontSize: 10, fontWeight: 600, color: "#3E4260", letterSpacing: "0.08em", textTransform: "uppercase" }}>Estado</div>
+          {statusOptions.map(s => (
+            <button key={s} onClick={() => setLibFilterStatus(s)} style={itemStyle(libFilterStatus === s)}>{statusLabels[s]}</button>
+          ))}
+          <div style={{ padding: "12px 16px 4px", fontSize: 10, fontWeight: 600, color: "#3E4260", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 8 }}>Proyecto</div>
+          <button onClick={() => setLibFilterProject("Todos")} style={itemStyle(libFilterProject === "Todos")}>Todos</button>
+          {projects.map(p => (
+            <button key={p.id} onClick={() => setLibFilterProject(p.id)} style={itemStyle(libFilterProject === p.id)}>{p.name}</button>
+          ))}
+        </div>
+      );
+    }
+
+    if (tab === "personal") {
+      const tipoOptions = ["Todos", "ERROR", "ACIERTO", "COMPROMISO", "APOYO_EXTRA"];
+      const tipoLabels: Record<string, string> = { Todos:"Todos", ERROR:"Errores", ACIERTO:"Aciertos", COMPROMISO:"Compromisos", APOYO_EXTRA:"Apoyo extra" };
+      const celulaOptions = ["Todos", "Nóminas / SAC", "Backend SIR", "Frontend SIR", "Nuevas Tecnologías", "DBA", "DevOps", "QA", "Diseño", "Auditoría de proyectos"];
+      return (
+        <div>
+          <div style={{ padding: "12px 16px 4px", fontSize: 10, fontWeight: 600, color: "#3E4260", letterSpacing: "0.08em", textTransform: "uppercase" }}>Vista</div>
+          <button onClick={() => setPersonalView("personas")} style={itemStyle(personalView === "personas")}>Personas</button>
+          <button onClick={() => setPersonalView("carga")} style={itemStyle(personalView === "carga")}>Carga por proyecto</button>
+          <div style={{ padding: "12px 16px 4px", fontSize: 10, fontWeight: 600, color: "#3E4260", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 8 }}>Célula</div>
+          {celulaOptions.map(c => (
+            <button key={c} onClick={() => setPersonalFilterCelula(c)} style={itemStyle(personalFilterCelula === c)}>{c}</button>
+          ))}
+          <div style={{ padding: "12px 16px 4px", fontSize: 10, fontWeight: 600, color: "#3E4260", letterSpacing: "0.08em", textTransform: "uppercase", marginTop: 8 }}>Tipo de registro</div>
+          {tipoOptions.map(t => (
+            <button key={t} onClick={() => setPersonalFilterTipo(t)} style={itemStyle(personalFilterTipo === t)}>{tipoLabels[t]}</button>
+          ))}
+        </div>
+      );
+    }
+
     if (tab === "historial") {
       return (
         <div style={{ padding: "8px 0" }}>
@@ -3436,7 +3483,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
     }}>
       <AppHeader
         activeTab={tab}
-        onTabChange={t => { setTab(t); setSelectedCell("Todos"); setSelectedProject("Todos"); setCreatingProject(false); setNewProjectInput(""); setAssociatingCell(""); setAssociatingTask(""); setAcuerdosFilterWeek(""); setAcuerdosFilterStatus("Todos"); }}
+        onTabChange={t => { setTab(t); setSelectedCell("Todos"); setSelectedProject("Todos"); setCreatingProject(false); setNewProjectInput(""); setAssociatingCell(""); setAssociatingTask(""); setAcuerdosFilterWeek(""); setAcuerdosFilterStatus("Todos"); setLibFilterProject("Todos"); setLibFilterStatus("Todos"); setPersonalFilterCelula("Todos"); setPersonalFilterTipo("Todos"); setPersonalView("personas"); }}
         week={d?.week}
         onLogout={handleLogout}
         onRefresh={load}
@@ -3446,6 +3493,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
         onGeneratePdf={() => generatePdf()}
         onBackToLive={backToLive}
         pdfGenerating={pdfGenerating}
+        userRole={userRole}
       />
       {tab === "home" && (
         <main style={{ flex: 1, overflowY: "auto", background: "#09090C" }}>
@@ -4254,6 +4302,21 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
               projects={projects}
               filterWeek={acuerdosFilterWeek}
               filterStatus={acuerdosFilterStatus}
+            />
+          )}
+          {tab === "liberaciones" && (
+            <LiberacionesTab
+              projects={projects}
+              filterProject={libFilterProject}
+              filterStatus={libFilterStatus}
+            />
+          )}
+          {tab === "personal" && userRole === "pmo" && (
+            <PersonalTab
+              projects={projects}
+              filterCelula={personalFilterCelula}
+              filterTipo={personalFilterTipo}
+              view={personalView}
             />
           )}
           {tab === "historial" && (

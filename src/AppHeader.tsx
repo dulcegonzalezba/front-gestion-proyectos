@@ -12,14 +12,16 @@ interface AppHeaderProps {
   onGeneratePdf?: () => void;
   onBackToLive?: () => void;
   pdfGenerating?: boolean;
+  userRole?: string | null;
 }
 
-const TABS: [string, string][] = [
+const BASE_TABS: [string, string][] = [
   ["home", "Inicio"],
   ["celulas", "Células"],
   ["proyectos", "Proyectos"],
   ["pmo", "PMO"],
   ["acuerdos", "Acuerdos"],
+  ["liberaciones", "Liberaciones"],
   ["historial", "Historial"],
 ];
 
@@ -31,7 +33,12 @@ const BTN_BASE = {
 export default function AppHeader({
   activeTab, onTabChange, week, onLogout, onRefresh,
   refreshing, liveIndicatorState, onSaveCheckpoint, onGeneratePdf, onBackToLive, pdfGenerating,
+  userRole,
 }: AppHeaderProps) {
+  // La pestaña RH (personal) solo es visible para rol 'pmo' — datos sensibles.
+  const TABS: [string, string][] = userRole === "pmo"
+    ? [...BASE_TABS, ["personal", "RH"] as [string, string]]
+    : BASE_TABS;
   return (
     <header
       role="banner"
