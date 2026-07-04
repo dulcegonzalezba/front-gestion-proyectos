@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
+import { pdf } from "@react-pdf/renderer";
 import { getToken } from "./auth";
+import OrganigramaPdf, { type OrgNode } from "./OrganigramaPdf";
 
 type EventoTipo = "ERROR" | "ACIERTO" | "COMPROMISO" | "APOYO_EXTRA";
 type CompromisoStatus = "PENDIENTE" | "CUMPLIDO" | "INCUMPLIDO" | "PARCIAL";
@@ -120,6 +122,7 @@ export default function PersonalTab({ projects, filterCelula, filterTipo, view =
   const [creando, setCreando] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [pdfGen, setPdfGen] = useState(false);
   const [carga, setCarga] = useState<CargaRow[]>([]);
 
   const [form, setForm] = useState({ name: "", puesto: "", celulaName: "", email: "", birthday: "", notes: "" });
@@ -171,6 +174,43 @@ export default function PersonalTab({ projects, filterCelula, filterTipo, view =
       }
     } finally {
       setSeeding(false);
+    }
+  };
+
+  const handleOrganigramaPdf = async () => {
+    if (personas.length === 0) return;
+    setPdfGen(true);
+    try {
+      // Reúne la bitácora de cada persona (usa la ya cargada; pide la faltante en paralelo).
+      const nodes: OrgNode[] = await Promise.all(
+        personas.map(async (p) => {
+          let evs = eventos[p.id];
+          if (!evs) {
+            const res = await fetch(`/api/personas/${p.id}/eventos`, { headers: authHeaders() });
+            evs = res.ok ? await res.json() : [];
+          }
+          return {
+            persona: {
+              id: p.id, name: p.name, puesto: p.puesto, celulaName: p.celulaName,
+              email: p.email, esLider: p.esLider, activo: p.activo,
+            },
+            eventos: (evs ?? []).map((e) => ({ id: e.id, tipo: e.tipo, status: e.status })),
+          };
+        })
+      );
+      const blob = await pdf(<OrganigramaPdf nodes={nodes} generatedAt={new Date()} />).toBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `organigrama-equipo-${today()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("No se pudo generar el organigrama PDF. Intenta de nuevo.");
+    } finally {
+      setPdfGen(false);
     }
   };
 
@@ -290,8 +330,12 @@ export default function PersonalTab({ projects, filterCelula, filterTipo, view =
         <span style={{ fontSize: 12, color: "#7A7F9A" }}>
           {visible.length} persona(s){filterCelula && filterCelula !== "Todos" ? ` · ${filterCelula}` : ""}
         </span>
+        <button onClick={handleOrganigramaPdf} disabled={pdfGen || personas.length === 0}
+          style={{ ...BTN, marginLeft: "auto", background: "#14161E", border: "1px solid #C9A84C55", borderRadius: 8, color: "#C9A84C", fontSize: 12, fontWeight: 600, padding: "6px 14px", opacity: pdfGen || personas.length === 0 ? 0.6 : 1 }}>
+          {pdfGen ? "Generando..." : "📄 Organigrama PDF"}
+        </button>
         <button onClick={handleSeed} disabled={seeding}
-          style={{ ...BTN, marginLeft: "auto", background: "#14161E", border: "1px solid #1E2233", borderRadius: 8, color: "#7A7F9A", fontSize: 12, fontWeight: 600, padding: "6px 14px", opacity: seeding ? 0.6 : 1 }}>
+          style={{ ...BTN, background: "#14161E", border: "1px solid #1E2233", borderRadius: 8, color: "#7A7F9A", fontSize: 12, fontWeight: 600, padding: "6px 14px", opacity: seeding ? 0.6 : 1 }}>
           {seeding ? "Precargando..." : "⚡ Precargar equipo FSW"}
         </button>
         <button onClick={() => setCreando(c => !c)}
