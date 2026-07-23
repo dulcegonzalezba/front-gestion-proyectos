@@ -954,11 +954,14 @@ export default function App() {
         const curId = (snap as any).id;
         const curIso = snap.isoWeek;
         const curSavedAt = snap.savedAt;
-        const prevMeta: any =
-          list.find(s => s.id !== curId && s.isoWeek !== curIso && s.savedAt <= curSavedAt)
-          // Respaldo: si solo hay checkpoints de la misma semana, usa el inmediatamente anterior.
-          ?? list.find(s => s.id !== curId && s.savedAt < curSavedAt)
-          ?? null;
+        // La lista viene ordenada DESC por savedAt, así que el primer match es el inmediatamente anterior.
+        const prevMeta: any = curId != null
+          // Reimpresión de un checkpoint guardado → SIEMPRE contra el checkpoint inmediatamente anterior.
+          ? (list.find(s => s.id !== curId && s.savedAt < curSavedAt) ?? null)
+          // PDF en vivo (sin id) → contra el más reciente de otra semana; respaldo: el inmediatamente anterior.
+          : (list.find(s => s.isoWeek !== curIso && s.savedAt <= curSavedAt)
+             ?? list.find(s => s.savedAt < curSavedAt)
+             ?? null);
         if (prevMeta) {
           const prevRes = await fetch(`/api/snapshots/${prevMeta.id}`, { headers });
           if (prevRes.ok) {

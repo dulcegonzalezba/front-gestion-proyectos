@@ -445,6 +445,81 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontFamily: 'Helvetica-Bold',
   },
+  // ── Avance vs checkpoint: barra apilada proporcional + leyenda ──
+  progressBarTrack: {
+    flexDirection: 'row',
+    height: 16,
+    borderRadius: 4,
+    backgroundColor: '#E7DFD2',
+    overflow: 'hidden',
+    marginBottom: 6,
+  },
+  progressSeg: {
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  progressSegText: {
+    color: '#FFFFFF',
+    fontSize: 7,
+    fontFamily: 'Helvetica-Bold',
+  },
+  legendRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 10,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 2,
+    marginRight: 4,
+  },
+  legendText: {
+    fontSize: 7.5,
+    color: '#5C4A35',
+  },
+  // ── Avance vs checkpoint: detalle compacto en 2 columnas ──
+  compGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 2,
+  },
+  compItem: {
+    width: '50%',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingRight: 10,
+    marginBottom: 3,
+  },
+  compDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    marginTop: 3,
+    marginRight: 5,
+    flexShrink: 0,
+  },
+  compItemTitle: {
+    flex: 1,
+    fontSize: 8.5,
+    color: '#1A1208',
+  },
+  compItemCell: {
+    fontSize: 7,
+    color: '#8A7256',
+  },
+  compMore: {
+    fontSize: 7.5,
+    color: '#9C8B72',
+    marginTop: 1,
+    marginBottom: 2,
+  },
   // Footer
   footer: {
     position: 'absolute',
@@ -541,26 +616,28 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
     );
   };
 
-  // ── Línea compacta para los listados de la comparativa ──
-  // showArrow = true muestra "Estado anterior → Estado actual"; si no, solo el estado actual.
-  const compLine = (t: CompTask, key: number, showArrow: boolean) => {
-    const proj = t.id ? projectByTask[t.id] : undefined;
-    const metaTail = [t.cell, proj].filter(Boolean).join('  ·  ');
-    return (
-      <View key={key} style={styles.itemRow} wrap={false}>
-        <Text style={styles.bullet}>•</Text>
-        <View style={styles.itemContent}>
-          <Text style={styles.itemTitle}>{t.title.substring(0, 90)}</Text>
-          <Text style={styles.itemMeta}>
-            {showArrow && t.fromStatus
-              ? `${label(t.fromStatus)} → ${label(t.status)}`
-              : label(t.status)}
-            {metaTail ? `  ·  ${metaTail}` : ''}
-          </Text>
-        </View>
-      </View>
-    );
-  };
+  // ── Ítem compacto para la comparativa (2 columnas, punto de color) ──
+  // La categoría (Completadas / Avanzaron / Nuevas / Regresión) ya comunica el cambio,
+  // así que el ítem solo muestra el título + célula: menos texto, más visual.
+  const compChip = (t: CompTask, color: string, key: number) => (
+    <View key={key} style={styles.compItem} wrap={false}>
+      <View style={[styles.compDot, { backgroundColor: color }]} />
+      <Text style={styles.compItemTitle}>
+        {t.title.substring(0, 58)}
+        {t.cell ? <Text style={styles.compItemCell}>{`  ${t.cell}`}</Text> : ''}
+      </Text>
+    </View>
+  );
+
+  // Grupos de la comparativa (mismo color en KPI, barra, leyenda y detalle)
+  const COMP_CAP = 12; // máx. ítems listados por grupo; el resto se resume como "+N más"
+  const compGroups = comp ? [
+    { label: 'Completadas',  color: '#15803d', count: comp.summary.completadas, items: comp.completadas },
+    { label: 'Avanzaron',    color: '#1d4ed8', count: comp.summary.avances,     items: comp.avances },
+    { label: 'Nuevas',       color: '#C9A84C', count: comp.summary.nuevas,      items: comp.nuevas },
+    { label: 'En regresión', color: '#b91c1c', count: comp.summary.regresiones, items: comp.regresiones },
+  ] : [];
+  const compTotal = compGroups.reduce((s, g) => s + g.count, 0);
 
   return (
     <Document title={`Reporte SIGOB PMO — ${snap.isoWeek}`} author="SIGOB PMO">
@@ -585,13 +662,13 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
             <Text style={styles.kpiValue}>{kpiEnfoques}</Text>
             <Text style={styles.kpiLabel}>Enfoques</Text>
           </View>
-          <View style={[styles.kpi, { borderLeftColor: '#b91c1c' }]}>
-            <Text style={styles.kpiValue}>{kpiPrio}</Text>
-            <Text style={styles.kpiLabel}>Urgentes / Prioridad</Text>
-          </View>
           <View style={[styles.kpi, { borderLeftColor: '#a16207' }]}>
             <Text style={styles.kpiValue}>{kpiSemana}</Text>
             <Text style={styles.kpiLabel}>Esta semana</Text>
+          </View>
+          <View style={[styles.kpi, { borderLeftColor: '#b91c1c' }]}>
+            <Text style={styles.kpiValue}>{kpiPrio}</Text>
+            <Text style={styles.kpiLabel}>Urgentes / Atrasadas</Text>
           </View>
         </View>
 
@@ -604,22 +681,22 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
             : activeFocus.map((f, i) => taskCard(f, i))}
         </View>
 
-        {/* ── 4. Urgentes · Importantes · Alta prioridad ─────────────── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Urgentes · Importantes · Alta prioridad</Text>
-          <Text style={styles.sectionIntro}>Tareas que no deben perder visibilidad esta semana.</Text>
-          {prioritized.length === 0
-            ? <Text style={styles.emptyNote}>Sin tareas urgentes ni prioritarias.</Text>
-            : prioritized.map((t, i) => taskCard(t, i))}
-        </View>
-
-        {/* ── 5. Tareas comprometidas esta semana ────────────────────── */}
+        {/* ── 4. Comprometidas esta semana (se toman sí o sí) ────────── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Comprometidas esta semana</Text>
-          <Text style={styles.sectionIntro}>Tareas marcadas para abordarse en la semana en curso.</Text>
+          <Text style={styles.sectionIntro}>Se toman sí o sí esta semana: compromiso en firme del equipo.</Text>
           {weekTasks.length === 0
             ? <Text style={styles.emptyNote}>Sin tareas comprometidas para esta semana.</Text>
             : weekTasks.map((t, i) => taskCard(t, i))}
+        </View>
+
+        {/* ── 5. Urgentes · Importantes (atrasadas → próximas) ───────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Urgentes · Importantes · Atrasadas</Text>
+          <Text style={styles.sectionIntro}>Tareas ya atrasadas. Próximas candidatas a entrar en la semana.</Text>
+          {prioritized.length === 0
+            ? <Text style={styles.emptyNote}>Sin tareas urgentes ni atrasadas.</Text>
+            : prioritized.map((t, i) => taskCard(t, i))}
         </View>
 
         {/* ── 6. Acuerdos tomados ────────────────────────────────────── */}
@@ -691,53 +768,55 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
                 ? `Cambios desde ${comp.prev.week} (${semanaLabel(comp.prev.isoWeek)}).`
                 : 'Cambios desde el checkpoint anterior.'}
             </Text>
-            {!compHasData && (
-              <Text style={styles.emptyNote}>Sin cambios respecto al checkpoint anterior.</Text>
-            )}
-            {/* KPIs del avance */}
-            <View style={styles.miniKpiRow}>
-              <View style={[styles.miniKpi, { borderLeftColor: '#15803d' }]}>
-                <Text style={styles.miniKpiValue}>{comp!.summary.completadas}</Text>
-                <Text style={styles.miniKpiLabel}>Completadas</Text>
-              </View>
-              <View style={[styles.miniKpi, { borderLeftColor: '#1d4ed8' }]}>
-                <Text style={styles.miniKpiValue}>{comp!.summary.avances}</Text>
-                <Text style={styles.miniKpiLabel}>Avanzaron</Text>
-              </View>
-              <View style={[styles.miniKpi, { borderLeftColor: '#C9A84C' }]}>
-                <Text style={styles.miniKpiValue}>{comp!.summary.nuevas}</Text>
-                <Text style={styles.miniKpiLabel}>Nuevas</Text>
-              </View>
-              <View style={[styles.miniKpi, { borderLeftColor: '#b91c1c' }]}>
-                <Text style={styles.miniKpiValue}>{comp!.summary.regresiones}</Text>
-                <Text style={styles.miniKpiLabel}>En regresión</Text>
-              </View>
-            </View>
-            {/* Detalle por tarea */}
-            {comp!.completadas.length > 0 && (
-              <View>
-                <Text style={styles.cellSubHeader}>Completadas · {comp!.completadas.length}</Text>
-                {comp!.completadas.map((t, i) => compLine(t, i, true))}
-              </View>
-            )}
-            {comp!.avances.length > 0 && (
-              <View>
-                <Text style={styles.cellSubHeader}>Avanzaron · {comp!.avances.length}</Text>
-                {comp!.avances.map((t, i) => compLine(t, i, true))}
-              </View>
-            )}
-            {comp!.nuevas.length > 0 && (
-              <View>
-                <Text style={styles.cellSubHeader}>Nuevas · {comp!.nuevas.length}</Text>
-                {comp!.nuevas.map((t, i) => compLine(t, i, false))}
-              </View>
-            )}
-            {comp!.regresiones.length > 0 && (
-              <View>
-                <Text style={styles.cellSubHeader}>En regresión · {comp!.regresiones.length}</Text>
-                {comp!.regresiones.map((t, i) => compLine(t, i, true))}
-              </View>
-            )}
+            {!compHasData
+              ? <Text style={styles.emptyNote}>Sin cambios respecto al checkpoint anterior.</Text>
+              : (
+                <>
+                  {/* KPIs del avance */}
+                  <View style={styles.miniKpiRow}>
+                    {compGroups.map(g => (
+                      <View key={g.label} style={[styles.miniKpi, { borderLeftColor: g.color }]}>
+                        <Text style={styles.miniKpiValue}>{g.count}</Text>
+                        <Text style={styles.miniKpiLabel}>{g.label}</Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  {/* Barra apilada proporcional: composición del avance de un vistazo */}
+                  <View style={styles.progressBarTrack}>
+                    {compGroups.filter(g => g.count > 0).map(g => {
+                      const pct = (g.count / compTotal) * 100;
+                      return (
+                        <View key={g.label} style={[styles.progressSeg, { width: `${pct}%`, backgroundColor: g.color }]}>
+                          {pct >= 8 && <Text style={styles.progressSegText}>{g.count}</Text>}
+                        </View>
+                      );
+                    })}
+                  </View>
+                  {/* Leyenda */}
+                  <View style={styles.legendRow}>
+                    {compGroups.map(g => (
+                      <View key={g.label} style={styles.legendItem}>
+                        <View style={[styles.legendDot, { backgroundColor: g.color }]} />
+                        <Text style={styles.legendText}>{g.label} · {g.count}</Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  {/* Detalle compacto por grupo (2 columnas, sin ruido de estados) */}
+                  {compGroups.map(g => g.items.length > 0 && (
+                    <View key={g.label}>
+                      <Text style={styles.cellSubHeader}>{g.label} · {g.count}</Text>
+                      <View style={styles.compGrid}>
+                        {g.items.slice(0, COMP_CAP).map((t, i) => compChip(t, g.color, i))}
+                      </View>
+                      {g.items.length > COMP_CAP && (
+                        <Text style={styles.compMore}>+{g.items.length - COMP_CAP} más</Text>
+                      )}
+                    </View>
+                  ))}
+                </>
+              )}
           </View>
         )}
 

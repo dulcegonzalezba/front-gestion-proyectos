@@ -699,19 +699,19 @@ export default function HomePage({ focusItems, tasks, week, onFocusUpdate, onFoc
                 </div>
               ) : (
                 <>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginBottom: 8, paddingRight: onFocusUpdate ? 64 : 0 }}>
                     <StatusBadge status={f.status} />
                     {f.cell && f.cell.split(",").map(s => s.trim()).filter(Boolean).map(cn => (
                       <span key={cn} style={{ fontSize: 9, color: CELL_CLR[cn] ?? T.text3, background: (CELL_CLR[cn] ?? "#475569") + "18", padding: "2px 7px", borderRadius: 20, border: `1px solid ${(CELL_CLR[cn] ?? "#475569")}35` }}>{cn}</span>
                     ))}
-                    {onFocusUpdate && (
-                      <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-                        {!isArchived && <button title="Archivar" onClick={() => onFocusUpdate(f.id, { status: "ARCHIVADO" })} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 13, padding: 0 }}>📦</button>}
-                        <button title="Editar" onClick={() => { setEditFocusId(f.id); setEditForm({ title: f.title, resp: f.resp, cell: f.cell ?? "", notes: f.notes ?? "", status: f.status }); }} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 13, padding: 0 }}>✏️</button>
-                        {onFocusDelete && <button title="Eliminar" onClick={() => onFocusDelete(f.id)} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 13, padding: 0 }}>🗑</button>}
-                      </div>
-                    )}
                   </div>
+                  {onFocusUpdate && (
+                    <div style={{ position: "absolute", top: 12, right: 12, display: "flex", gap: 6 }}>
+                      {!isArchived && <button title="Archivar" onClick={() => onFocusUpdate(f.id, { status: "ARCHIVADO" })} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: 1 }}>📦</button>}
+                      <button title="Editar" onClick={() => { setEditFocusId(f.id); setEditForm({ title: f.title, resp: f.resp, cell: f.cell ?? "", notes: f.notes ?? "", status: f.status }); }} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: 1 }}>✏️</button>
+                      {onFocusDelete && <button title="Eliminar" onClick={() => onFocusDelete(f.id)} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: 1 }}>🗑</button>}
+                    </div>
+                  )}
                   <div style={{ fontSize: 12, color: T.text1, fontWeight: 600, lineHeight: 1.45, marginBottom: 5, textDecoration: isArchived ? "line-through" : "none" }}>{f.title}</div>
                   <div style={{ fontSize: 10, color: T.text2, marginBottom: f.notes ? 6 : 0 }}>{f.resp}</div>
                   {f.notes && <div style={{ fontSize: 10, color: T.text3, lineHeight: 1.5, paddingTop: 6, borderTop: `1px solid ${T.border}` }}>{f.notes}</div>}

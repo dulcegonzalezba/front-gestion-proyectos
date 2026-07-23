@@ -55,6 +55,25 @@ export default function CheckpointTimeline({ checkpoints, currentWeek, onView, o
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [pdfRowId, setPdfRowId] = useState<number | null>(null);
+
+  // Reimprime el PDF de un checkpoint guardado (comparado contra el inmediatamente anterior).
+  // Carga el snapshot completo por id — la lista solo trae metadatos — y delega en onGeneratePdf.
+  const reprintPdf = async (id: number) => {
+    if (!onGeneratePdf) return;
+    setPdfRowId(id);
+    setError("");
+    try {
+      const res = await fetch(`${API}/${id}`, { headers: authHeaders() });
+      if (!res.ok) throw new Error("Error al cargar checkpoint");
+      const snap = await res.json();
+      await onGeneratePdf(snap);
+    } catch (e: any) {
+      setError(e.message || "Error al generar PDF");
+    } finally {
+      setPdfRowId(null);
+    }
+  };
 
   const toggleSelect = (id: number) => {
     if (selection.includes(id)) {
@@ -228,7 +247,7 @@ export default function CheckpointTimeline({ checkpoints, currentWeek, onView, o
         )}
         {selection.length === 0 && (
           <div style={{ color: "#4A4F64", fontSize: 11 }}>
-            Selecciona un punto para verlo · Selecciona dos para comparar
+            Selecciona un punto para verlo · Selecciona dos para comparar · 📄 PDF en cada fila reimprime el reporte
           </div>
         )}
       </div>
@@ -276,6 +295,23 @@ export default function CheckpointTimeline({ checkpoints, currentWeek, onView, o
               </div>
               {cp.isoWeek === currentWeek && (
                 <span style={{ fontSize: 9, color: "#22c55e", fontWeight: 700 }}>ACTUAL</span>
+              )}
+              {onGeneratePdf && (
+                <button
+                  onClick={e => { e.stopPropagation(); reprintPdf(cp.id); }}
+                  title="Reimprimir PDF (comparado con el checkpoint inmediatamente anterior)"
+                  disabled={pdfRowId === cp.id || pdfGenerating}
+                  style={{
+                    background: "none",
+                    border: `1px solid ${pdfRowId === cp.id ? "#1E2233" : "#818cf840"}`,
+                    borderRadius: 6,
+                    color: pdfRowId === cp.id || pdfGenerating ? "#4A4F64" : "#818cf8",
+                    cursor: pdfRowId === cp.id || pdfGenerating ? "not-allowed" : "pointer",
+                    fontSize: 11, fontWeight: 600, padding: "3px 9px", flexShrink: 0, whiteSpace: "nowrap",
+                  }}
+                >
+                  {pdfRowId === cp.id ? "Generando…" : "📄 PDF"}
+                </button>
               )}
               {onDeleteCheckpoint && (
                 confirmDelete === cp.id ? (
