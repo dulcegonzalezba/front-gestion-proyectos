@@ -862,7 +862,13 @@ export default function App() {
   const confirmCheckpoint = () => {
     const trimmed = weekVal.trim();
     if (!trimmed) return;
-    setD(prev => prev ? { ...prev, week: trimmed } : prev);
+    // Persistir la semana (y refrescar el isoWeek) TAMBIÉN en el estado en vivo (sigob:plan21),
+    // no solo en el snapshot. Antes solo se guardaba en el checkpoint, así que al recargar el
+    // header y el PDF en vivo revertían a la semana anterior y el timeline marcaba como "ACTUAL"
+    // un checkpoint viejo (currentWeek depende de d.isoWeek).
+    const iso = getISOWeek(new Date());
+    const nd = d ? { ...d, week: trimmed, isoWeek: iso } : d;
+    if (nd) save(nd);
     setEditWeek(false);
     saveCheckpoint(trimmed);
   };
