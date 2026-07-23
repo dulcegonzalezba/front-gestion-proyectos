@@ -899,6 +899,23 @@ export default function App() {
     setLiveIndicatorState("live");
   };
 
+  // Promueve un checkpoint al estado EN VIVO (sigob:plan21): reemplaza el plan actual
+  // con los datos de ese checkpoint (semana, isoWeek, células, enfoques, PMO, checklist).
+  // Útil cuando el plan en vivo quedó desincronizado respecto al último checkpoint.
+  const restoreCheckpointToLive = async (snap: any) => {
+    if (!snap?.data) return;
+    try {
+      const data = { ...snap.data, week: snap.week, isoWeek: snap.isoWeek };
+      await save(data); // persiste a SK y actualiza el estado en memoria
+      if (Array.isArray(snap.pmo)) await savePmo(snap.pmo);
+      if (Array.isArray(snap.checklist)) await saveChecklist(snap.checklist);
+      backToLive();
+      toast.success(`Estado en vivo actualizado con el checkpoint · ${snap.week}`);
+    } catch {
+      toast.error("Error al restaurar el checkpoint — intenta de nuevo");
+    }
+  };
+
   const deleteCheckpoint = async (id: number) => {
     try {
       const token = getToken();
@@ -4334,6 +4351,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
               currentWeek={d?.isoWeek}
               onGeneratePdf={generatePdf}
               onDeleteCheckpoint={deleteCheckpoint}
+              onRestore={restoreCheckpointToLive}
               pdfGenerating={pdfGenerating}
             />
           )}

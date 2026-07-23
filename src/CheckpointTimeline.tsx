@@ -10,6 +10,7 @@ interface Props {
   onView?: (snap: any) => void;
   onGeneratePdf?: (snap: any) => void;
   onDeleteCheckpoint?: (id: number) => void | Promise<void>;
+  onRestore?: (snap: any) => void | Promise<void>;
   pdfGenerating?: boolean;
 }
 
@@ -48,7 +49,7 @@ function fmtDate(iso: string) {
   });
 }
 
-export default function CheckpointTimeline({ checkpoints, currentWeek, onView, onGeneratePdf, onDeleteCheckpoint, pdfGenerating }: Props) {
+export default function CheckpointTimeline({ checkpoints, currentWeek, onView, onGeneratePdf, onDeleteCheckpoint, onRestore, pdfGenerating }: Props) {
   const [selection, setSelection] = useState<number[]>([]);
   const [detail, setDetail] = useState<any | null>(null);
   const [comparison, setComparison] = useState<any | null>(null);
@@ -56,6 +57,27 @@ export default function CheckpointTimeline({ checkpoints, currentWeek, onView, o
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [pdfRowId, setPdfRowId] = useState<number | null>(null);
+  const [confirmRestore, setConfirmRestore] = useState<number | null>(null);
+  const [restoringId, setRestoringId] = useState<number | null>(null);
+
+  // Promueve un checkpoint al estado en vivo (reemplaza el plan actual).
+  // Carga el snapshot completo por id y delega en onRestore.
+  const restoreLive = async (id: number) => {
+    if (!onRestore) return;
+    setRestoringId(id);
+    setError("");
+    try {
+      const res = await fetch(`${API}/${id}`, { headers: authHeaders() });
+      if (!res.ok) throw new Error("Error al cargar checkpoint");
+      const snap = await res.json();
+      await onRestore(snap);
+    } catch (e: any) {
+      setError(e.message || "Error al restaurar");
+    } finally {
+      setRestoringId(null);
+      setConfirmRestore(null);
+    }
+  };
 
   // Reimprime el PDF de un checkpoint guardado (comparado contra el inmediatamente anterior).
   // Carga el snapshot completo por id — la lista solo trae metadatos — y delega en onGeneratePdf.
@@ -247,7 +269,7 @@ export default function CheckpointTimeline({ checkpoints, currentWeek, onView, o
         )}
         {selection.length === 0 && (
           <div style={{ color: "#4A4F64", fontSize: 11 }}>
-            Selecciona un punto para verlo · Selecciona dos para comparar · 📄 PDF en cada fila reimprime el reporte
+            Selecciona un punto para verlo · Selecciona dos para comparar · 📄 PDF reimprime el reporte · ⤴ Usar fija ese checkpoint como estado en vivo
           </div>
         )}
       </div>
@@ -312,6 +334,34 @@ export default function CheckpointTimeline({ checkpoints, currentWeek, onView, o
                 >
                   {pdfRowId === cp.id ? "Generando…" : "📄 PDF"}
                 </button>
+              )}
+              {onRestore && (
+                confirmRestore === cp.id ? (
+                  <span style={{ display: "flex", gap: 4, alignItems: "center" }} onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => restoreLive(cp.id)}
+                      disabled={restoringId === cp.id}
+                      title="Reemplaza el plan en vivo con los datos de este checkpoint"
+                      style={{ background: "#14532d", color: "#bbf7d0", border: "none", borderRadius: 6, padding: "3px 9px", fontSize: 10, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
+                    >
+                      {restoringId === cp.id ? "Aplicando…" : "Sí, usar"}
+                    </button>
+                    <button
+                      onClick={() => setConfirmRestore(null)}
+                      style={{ background: "#1A1D28", color: "#7A7F9A", border: "none", borderRadius: 6, padding: "3px 7px", fontSize: 10, cursor: "pointer" }}
+                    >
+                      No
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={e => { e.stopPropagation(); setConfirmRestore(cp.id); }}
+                    title="Usar este checkpoint como estado en vivo (reemplaza el plan actual)"
+                    style={{ background: "none", border: "1px solid #22c55e40", borderRadius: 6, color: "#22c55e", cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "3px 9px", flexShrink: 0, whiteSpace: "nowrap" }}
+                  >
+                    ⤴ Usar
+                  </button>
+                )
               )}
               {onDeleteCheckpoint && (
                 confirmDelete === cp.id ? (
