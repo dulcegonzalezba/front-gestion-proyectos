@@ -6,7 +6,8 @@ import { toast } from 'sonner';
 import { pdf } from '@react-pdf/renderer';
 import AppHeader from './AppHeader';
 import PdfTemplate from './PdfTemplate';
-import DashboardTab from './DashboardTab';
+import ProyectosBoard from './ProyectosBoard';
+import type { Project as ProyectoBase } from './proyectoEstado';
 import SplitLayout from './SplitLayout';
 import HomePage from './HomePage';
 import AcuerdosTab from './AcuerdosTab';
@@ -328,7 +329,7 @@ const SK = "sigob:plan21"; // actualizado 22-abr-2026
 
 const CELL_NAMES = ["Todos","DBA","DevOps","Backend SIR","Frontend SIR","Nuevas Tec","Reporteador Nayarit"];
 
-type Project = { id: string; name: string; createdAt: string; taskRefs?: { taskId: string; cellName: string }[] };
+type Project = ProyectoBase;
 
 type ChecklistItem = {
   id: string;
@@ -654,6 +655,56 @@ export default function App() {
       }
     } catch { toast.error("Error de red"); }
     setNewTaskTitle(""); setNewTaskResp(""); setNewTaskStatus("PENDIENTE"); setNewTaskCell(""); setCreatingTaskForProject(false);
+  };
+
+  // ── Handlers parametrizados usados por el tablero operativo ──────────────
+  // (los de arriba dependen del estado del panel lateral; estos reciben todo por argumento)
+  const persistTaskRefs = async (project: Project, taskRefs: { taskId: string; cellName: string }[]) => {
+    const token = getToken();
+    const res = await fetch(`/api/projects/${project.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ name: project.name, taskRefs }),
+    });
+    if (res.status === 401) { clearToken(); navigate("/login"); return null; }
+    if (!res.ok) return null;
+    const updated: Project = await res.json();
+    setProjects(prev => prev.map(p => (p.id === updated.id ? updated : p)));
+    return updated;
+  };
+
+  const associateTaskToProject = async (projectId: string, cellName: string, taskId: string) => {
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return;
+    const taskRefs = [...(project.taskRefs ?? []), { taskId, cellName }];
+    const updated = await persistTaskRefs(project, taskRefs);
+    if (updated) toast.success("Tarea asociada");
+    else toast.error("Error al asociar tarea");
+  };
+
+  const createTaskForProject = async (
+    projectId: string,
+    cellName: string,
+    t: { title: string; resp: string; status: string },
+  ) => {
+    const project = projects.find(p => p.id === projectId);
+    if (!project || !d) return;
+    const id = cellName.substring(0, 3).toLowerCase() + "_" + Date.now();
+    const newTask = { id, title: t.title, resp: t.resp, status: t.status, notes: "", zoho: "" };
+    await save({
+      ...d,
+      cells: {
+        ...d.cells,
+        [cellName]: { ...d.cells[cellName], tasks: [...(d.cells[cellName]?.tasks ?? []), newTask] },
+      },
+    });
+    const updated = await persistTaskRefs(project, [...(project.taskRefs ?? []), { taskId: id, cellName }]);
+    if (updated) toast.success("Tarea creada y asociada");
+    else toast.error("Error al asociar la tarea nueva");
+  };
+
+  const handleProjectUpdated = (updated: Project) => {
+    setProjects(prev => prev.map(p => (p.id === updated.id ? { ...p, ...updated } : p)));
   };
 
   const BASE_PROJECTS = [
@@ -3799,295 +3850,18 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
           )}
           {/* === TAB: PROYECTOS === */}
           {tab === "proyectos" && (
-            selectedProject === "Todos" ? (
-              <div style={{ padding: "16px 0" }}>
-                <DashboardTab
-                  projects={projects}
-                  d={d}
-                  pmoItems={pmoItems}
-                  onSelectProject={id => { setSelectedProject(id); setAssociatingCell(""); setAssociatingTask(""); }}
-                />
-              </div>
-            ) : (
-              <div style={{ padding: "24px 0" }}>
-                <div style={{ fontSize: 16, fontWeight: 600, color: "#E8E3D8", marginBottom: 20 }}>
-                  {projects.find(p => p.id === selectedProject)?.name ?? "—"}
-                </div>
-                {(() => {
-                  const project = projects.find(p => p.id === selectedProject);
-                  const refs = project?.taskRefs ?? [];
-                  if (refs.length === 0) {
-                    return (
-                      <div style={{ color: "#7A7F9A", fontSize: 13, marginBottom: 24 }}>
-                        No hay tareas registradas para este proyecto
-                      </div>
-                    );
-                  }
-                  const groups: Record<string, { taskId: string; cellName: string }[]> = {};
-                  refs.forEach(r => {
-                    if (!groups[r.cellName]) groups[r.cellName] = [];
-                    groups[r.cellName].push(r);
-                  });
-                  return Object.entries(groups).map(([cellName, cellRefs]) => {
-                    const cellTasks = (d?.cells?.[cellName]?.tasks ?? []) as { id: string; title: string; resp: string; status: string; zoho: string }[];
-                    const tasks = cellRefs
-                      .map(r => cellTasks.find(t => t.id === r.taskId))
-                      .filter((t): t is NonNullable<typeof t> => t !== undefined);
-                    if (tasks.length === 0) return null;
-                    return (
-                      <div key={cellName} style={{ marginBottom: 20 }}>
-                        <div style={{
-                          fontSize: 10, fontWeight: 600, color: "#3E4260",
-                          textTransform: "uppercase", letterSpacing: "0.06em",
-                          marginBottom: 6,
-                        }}>
-                          {cellName} — {tasks.length} {tasks.length === 1 ? "tarea" : "tareas"}
-                        </div>
-                        {tasks.map(task => (
-                          <div key={task.id} style={{
-                            display: "flex", alignItems: "center", gap: 8,
-                            padding: "10px 14px",
-                            background: "#0F1117",
-                            border: "1px solid #1E2233",
-                            borderRadius: 10,
-                            marginBottom: 4,
-                          }}>
-                            <TaskTypeBadge zoho={task.zoho} />
-                            <span style={{
-                              display: "inline-block", width: 6, height: 6, borderRadius: "50%",
-                              background: (S as Record<string, {l:string;c:string}>)[task.status]?.c ?? "#3E4260",
-                              flexShrink: 0,
-                            }} />
-                            <span style={{
-                              flex: 1, fontSize: 13, color: "#E8E3D8",
-                              minWidth: 0, overflow: "hidden",
-                              textOverflow: "ellipsis", whiteSpace: "nowrap",
-                            }}>
-                              {task.title}
-                            </span>
-                            <span style={{ fontSize: 11, color: "#7A7F9A", whiteSpace: "nowrap", flexShrink: 0 }}>
-                              {task.resp}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  });
-                })()}
-                {/* Association UI */}
-                {(() => {
-                  const project = projects.find(p => p.id === selectedProject);
-                  const associatedIds = new Set((project?.taskRefs ?? []).map(r => r.taskId));
-                  const cellOptions = Object.keys(d?.cells || {});
-                  const tasksInCell = associatingCell
-                    ? ((d?.cells?.[associatingCell]?.tasks ?? []) as { id: string; title: string }[]).filter(t => !associatedIds.has(t.id))
-                    : [];
-                  return (
-                    <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid #1E2233" }}>
-                      <div style={{ fontSize: 10, fontWeight: 600, color: "#3E4260", marginBottom: 10, letterSpacing: "0.06em" }}>
-                        ASOCIAR TAREA
-                      </div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <select
-                          value={associatingCell}
-                          onChange={e => { setAssociatingCell(e.target.value); setAssociatingTask(""); }}
-                          style={{
-                            background: "#14161E", border: "1px solid #1E2233", borderRadius: 6,
-                            color: "#E8E3D8", fontSize: 12, padding: "6px 8px",
-                            fontFamily: "system-ui,sans-serif",
-                          }}
-                        >
-                          <option value="">Célula...</option>
-                          {cellOptions.map(n => <option key={n} value={n}>{n}</option>)}
-                        </select>
-                        <select
-                          value={associatingTask}
-                          onChange={e => setAssociatingTask(e.target.value)}
-                          disabled={!associatingCell || tasksInCell.length === 0}
-                          style={{
-                            background: "#14161E", border: "1px solid #1E2233", borderRadius: 6,
-                            color: associatingCell && tasksInCell.length > 0 ? "#E8E3D8" : "#7A7F9A",
-                            fontSize: 12, padding: "6px 8px", flex: 1, minWidth: 160,
-                            fontFamily: "system-ui,sans-serif",
-                          }}
-                        >
-                          <option value="">{tasksInCell.length === 0 && associatingCell ? "Sin tareas disponibles" : "Tarea..."}</option>
-                          {tasksInCell.map(t => (
-                            <option key={t.id} value={t.id}>
-                              {t.title.length > 55 ? t.title.slice(0, 55) + "…" : t.title}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          onClick={associateTask}
-                          disabled={!associatingCell || !associatingTask || submittingAssociation}
-                          style={{
-                            background: associatingCell && associatingTask && !submittingAssociation ? "#C9A84C" : "#1A1D28",
-                            border: "none", borderRadius: 6,
-                            color: associatingCell && associatingTask && !submittingAssociation ? "#09090C" : "#3E4260",
-                            cursor: associatingCell && associatingTask && !submittingAssociation ? "pointer" : "not-allowed",
-                            fontSize: 12, fontWeight: 600, padding: "6px 14px", minHeight: 32,
-                            fontFamily: "system-ui,sans-serif",
-                          }}
-                        >
-                          Asociar
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })()}
-                {/* === NUEVA TAREA DIRECTA === */}
-                <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #1E2233" }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#3E4260", marginBottom: 10, letterSpacing: "0.06em" }}>
-                    NUEVA TAREA
-                  </div>
-                  {!creatingTaskForProject ? (
-                    <button
-                      onClick={() => setCreatingTaskForProject(true)}
-                      style={{
-                        background: "none", border: "1px dashed #2E2E2E", borderRadius: 6,
-                        color: "#7A7F9A", cursor: "pointer", fontSize: 11,
-                        padding: "7px 14px", width: "100%",
-                      }}
-                    >
-                      + Crear tarea y asociar a este proyecto
-                    </button>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      <select
-                        value={newTaskCell}
-                        onChange={e => setNewTaskCell(e.target.value)}
-                        style={{ background: "#14161E", border: "1px solid #1E2233", borderRadius: 4, color: "#E8E3D8", fontSize: 12, padding: "6px 8px", fontFamily: "system-ui,sans-serif" }}
-                      >
-                        <option value="">Célula...</option>
-                        {Object.keys(d?.cells || {}).map(n => <option key={n} value={n}>{n}</option>)}
-                      </select>
-                      <input
-                        placeholder="Título de la tarea *"
-                        value={newTaskTitle}
-                        onChange={e => setNewTaskTitle(e.target.value)}
-                        style={{ background: "#14161E", border: "1px solid #1E2233", borderRadius: 4, color: "#E8E3D8", fontSize: 12, padding: "6px 8px", fontFamily: "system-ui,sans-serif" }}
-                      />
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <input
-                          placeholder="Responsable"
-                          value={newTaskResp}
-                          onChange={e => setNewTaskResp(e.target.value)}
-                          style={{ background: "#14161E", border: "1px solid #1E2233", borderRadius: 4, color: "#E8E3D8", fontSize: 12, padding: "6px 8px", flex: 1, fontFamily: "system-ui,sans-serif" }}
-                        />
-                        <select
-                          value={newTaskStatus}
-                          onChange={e => setNewTaskStatus(e.target.value)}
-                          style={{ background: "#14161E", border: "1px solid #1E2233", borderRadius: 4, color: "#E8E3D8", fontSize: 12, padding: "6px 8px", fontFamily: "system-ui,sans-serif" }}
-                        >
-                          {["PENDIENTE","EN_CURSO","ESTA_SEMANA","ALTA_PRIORIDAD","URGENTE","BLOQUEADO","COMPLETADO"].map(s => (
-                            <option key={s} value={s}>{s}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button
-                          onClick={createAndAssociateTask}
-                          disabled={!newTaskTitle.trim() || !newTaskCell}
-                          style={{
-                            background: newTaskTitle.trim() && newTaskCell ? "#C9A84C" : "#1A1D28",
-                            border: "none", borderRadius: 4,
-                            color: newTaskTitle.trim() && newTaskCell ? "#09090C" : "#3E4260",
-                            cursor: newTaskTitle.trim() && newTaskCell ? "pointer" : "not-allowed",
-                            fontSize: 12, fontWeight: 600, padding: "6px 14px", flex: 1,
-                          }}
-                        >
-                          Guardar tarea
-                        </button>
-                        <button
-                          onClick={() => { setCreatingTaskForProject(false); setNewTaskTitle(""); setNewTaskResp(""); setNewTaskCell(""); setNewTaskStatus("PENDIENTE"); }}
-                          style={{ background: "none", border: "1px solid #1E2233", borderRadius: 4, color: "#7A7F9A", cursor: "pointer", fontSize: 12, padding: "6px 12px" }}
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {/* === SECCION PMO OPERATIVO en vista de proyecto === */}
-                {(() => {
-                  const pmoTasks = checklistItems.filter(x => x.projectId === selectedProject);
-                  if (pmoTasks.length === 0) return null;
-                  const activePmo = pmoTasks.filter(x => x.status !== "COMPLETADO");
-                  const completedPmo = pmoTasks.filter(x => x.status === "COMPLETADO");
-                  return (
-                    <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid #1E2233" }}>
-                      <div style={{
-                        fontSize: 11, fontWeight: 600, color: "#7A7F9A",
-                        textTransform: "uppercase", letterSpacing: "0.06em",
-                        marginBottom: 8,
-                      }}>
-                        PMO OPERATIVO — {pmoTasks.length} {pmoTasks.length === 1 ? "tarea" : "tareas"}
-                      </div>
-                      {activePmo.map(item => (
-                        <div key={item.id} style={{
-                          display: "flex", alignItems: "center", gap: 8,
-                          padding: "10px 12px",
-                          background: "#0F1117",
-                          border: "1px solid #1E2233",
-                          borderRadius: 6,
-                          marginBottom: 4,
-                        }}>
-                          <TaskTypeBadge zoho="" />
-                          <span style={{
-                            display: "inline-block", width: 8, height: 8, borderRadius: "50%",
-                            background: (S as Record<string, { l: string; c: string }>)[item.status]?.c ?? "#9ca3af",
-                            flexShrink: 0,
-                          }} />
-                          <span style={{
-                            flex: 1, fontSize: 13, color: "#E8E3D8",
-                            minWidth: 0, overflow: "hidden",
-                            textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }}>
-                            {item.title}
-                          </span>
-                          <span style={{ fontSize: 10, color: "#7A7F9A", whiteSpace: "nowrap", flexShrink: 0 }}>
-                            {(S as Record<string, { l: string; c: string }>)[item.status]?.l ?? item.status}
-                          </span>
-                        </div>
-                      ))}
-                      {completedPmo.length > 0 && (
-                        <div style={{ marginTop: 8 }}>
-                          {completedPmo.map(item => (
-                            <div key={item.id} style={{
-                              display: "flex", alignItems: "flex-start", gap: 8,
-                              padding: "10px 12px",
-                              background: "#0F1117",
-                              border: "1px solid #1E2233",
-                              borderRadius: 6,
-                              marginBottom: 4,
-                              opacity: 0.6,
-                            }}>
-                              <TaskTypeBadge zoho="" />
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <span style={{
-                                  fontSize: 13, color: "#E8E3D8",
-                                  textDecoration: "line-through",
-                                  display: "block",
-                                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                                }}>
-                                  {item.title}
-                                </span>
-                                {item.completedAt && (
-                                  <span style={{ fontSize: 10, color: "#4ADE80", display: "block", marginTop: 2 }}>
-                                    Completada: {new Date(item.completedAt).toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" })}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-            )
+            <div style={{ padding: "20px 0" }}>
+              <ProyectosBoard
+                projects={projects}
+                d={d}
+                checklistItems={checklistItems}
+                selectedProject={selectedProject}
+                onSelectProject={id => { setSelectedProject(id); setAssociatingCell(""); setAssociatingTask(""); }}
+                onProjectUpdated={handleProjectUpdated}
+                onAssociateTask={associateTaskToProject}
+                onCreateTask={createTaskForProject}
+              />
+            </div>
           )}
           {/* === TAB: CHECKLIST PMO === */}
           {tab === "pmo" && (

@@ -148,6 +148,57 @@
   .sigob-live-indicator { display: flex; }
 }
 
+/* ── Tablero operativo de proyectos ─────────────────────────────────────── */
+@keyframes sigob-alert-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.35); }
+  50%      { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+}
+@keyframes sigob-drawer-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes sigob-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.sigob-semaforo {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+.sigob-board {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(232px, 1fr));
+  gap: 12px;
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.sigob-board--focus { grid-template-columns: minmax(0, 1fr); overflow-x: visible; }
+.sigob-drawer { width: min(560px, 100vw); animation: sigob-drawer-in 0.18s ease-out; }
+
+@media (max-width: 1200px) {
+  .sigob-semaforo { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .sigob-semaforo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sigob-board    { grid-template-columns: minmax(0, 1fr); overflow-x: visible; }
+  .sigob-drawer   { width: 100vw; }
+}
+
+/* Tarjeta de proyecto */
+.sigob-pcard { transition: border-color 0.15s, transform 0.12s, background 0.15s; }
+.sigob-pcard:hover { border-color: #3A4060 !important; transform: translateY(-1px); }
+.sigob-pcard:focus-visible { outline: 2px solid #C9A84C; outline-offset: 2px; }
+
+/* Botones de semáforo dentro de la tarjeta */
+.sigob-dot { transition: transform 0.12s, opacity 0.12s; }
+.sigob-dot:hover { transform: scale(1.35); opacity: 1 !important; }
+
+.sigob-tile { transition: border-color 0.15s, background 0.15s; }
+.sigob-tile:hover { border-color: #3A4060 !important; }
+
 :root {
   /* SIGOB Design System Tokens */
   --bg-primary: #111111;

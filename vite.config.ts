@@ -14,7 +14,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        // Por defecto 3001; se puede mover con API_TARGET cuando ese puerto
+        // ya lo ocupa otro proyecto local.
+        target: process.env.API_TARGET || 'http://localhost:3001',
         changeOrigin: true,
       },
     },
