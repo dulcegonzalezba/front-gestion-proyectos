@@ -70,6 +70,55 @@ type SnapProject = {
   id: string;
   name: string;
   taskRefs?: { taskId: string; cellName: string }[];
+  // Semáforo operativo. Opcionales porque los checkpoints antiguos no lo traen.
+  salud?: string;
+  criticidad?: string;
+  fase?: string;
+  pausaAuto?: boolean;
+  saludUpdatedAt?: string | null;
+};
+
+/** Entrada de bitácora de proyecto (incidencia, hito, nota, cambio de estatus). */
+type SnapIncidencia = {
+  id: number;
+  proyectoId: string;
+  tipo: string;
+  titulo: string;
+  descripcion: string;
+  severidad: string;
+  fecha: string | null;
+  resuelto: boolean;
+  createdAt: string;
+};
+
+type SnapLiberacion = {
+  id: string;
+  projectId: string;
+  title: string;
+  version: string;
+  releaseDate: string;
+  status: string;   // EXITOSA | CON_ERRORES | EN_PROGRESO | REVERTIDA
+  notes: string;
+};
+
+type SnapObservacion = {
+  id: string;
+  persona: string;
+  celulaName: string;
+  puesto: string;
+  tipo: string;     // ERROR | COMPROMISO
+  status: string;
+  title: string;
+  notes: string;
+  fecha: string | null;
+  projectId?: string;
+};
+
+type SnapEquipo = {
+  totalPersonas: number;
+  activos: number;
+  positivos: number;
+  observaciones: SnapObservacion[];
 };
 
 // Una tarea dentro de la comparativa: lleva su estado anterior para mostrar "antes → después".
@@ -107,6 +156,10 @@ export type CheckpointSnap = {
   acuerdos?: SnapAcuerdo[];
   projects?: SnapProject[];
   comparison?: Comparison | null;
+  // Estado vivo de la fábrica. Se adjunta al generar; un checkpoint viejo no lo trae.
+  incidencias?: SnapIncidencia[];
+  liberaciones?: SnapLiberacion[];
+  equipo?: SnapEquipo | null;
 };
 
 // ── Status helpers ─────────────────────────────────────────────────────────
@@ -148,6 +201,59 @@ function acuerdoSev(status: string): 'red' | 'gold' | 'green' | 'gray' {
   return 'gray';
 }
 const ACUERDO_ACCENT = { red: '#b91c1c', gold: '#C9A84C', green: '#15803d', gray: '#A9A097' };
+
+// ── Semáforo de proyectos ───────────────────────────────────────────────────
+// Mismo orden y semántica que el tablero: de lo sano a lo que arde.
+const SALUD_ORDEN = ['SIN_ERRORES', 'EN_OBSERVACION', 'CON_PENDIENTES', 'URGENTE'] as const;
+const SALUD_CFG: Record<string, { label: string; color: string }> = {
+  SIN_ERRORES:    { label: 'Sin errores',       color: '#15803d' },
+  EN_OBSERVACION: { label: 'En observación',    color: '#1d4ed8' },
+  CON_PENDIENTES: { label: 'Con pendientes',    color: '#a16207' },
+  URGENTE:        { label: 'Alerta / Bloqueado', color: '#b91c1c' },
+  // El valor retirado se sigue mapeando por si el checkpoint es anterior a la fusión.
+  CON_ERRORES:    { label: 'Alerta / Bloqueado', color: '#b91c1c' },
+};
+const saludDe = (p: SnapProject) => {
+  const s = p.salud ?? 'SIN_ERRORES';
+  return s === 'CON_ERRORES' ? 'URGENTE' : (SALUD_CFG[s] ? s : 'SIN_ERRORES');
+};
+const FASE_LABEL: Record<string, string> = {
+  PRODUCCION: 'Producción', DESARROLLO: 'Desarrollo', REFACTOR: 'Refactor', PAUSA: 'En pausa',
+};
+const CRIT_LABEL: Record<string, string> = {
+  CRITICA: 'Crítica', ALTA: 'Alta', MEDIA: 'Media', BAJA: 'Baja',
+};
+
+// ── Liberaciones ────────────────────────────────────────────────────────────
+const LIB_CFG: Record<string, { label: string; color: string }> = {
+  EXITOSA:     { label: 'Exitosa',     color: '#15803d' },
+  EN_PROGRESO: { label: 'En progreso', color: '#1d4ed8' },
+  CON_ERRORES: { label: 'Con errores', color: '#a16207' },
+  REVERTIDA:   { label: 'Revertida',   color: '#b91c1c' },
+};
+
+// ── Severidad de incidencias ────────────────────────────────────────────────
+const SEVERIDAD_CFG: Record<string, { label: string; color: string }> = {
+  CRITICA: { label: 'Crítica', color: '#b91c1c' },
+  ALTA:    { label: 'Alta',    color: '#c2410c' },
+  MEDIA:   { label: 'Media',   color: '#a16207' },
+  BAJA:    { label: 'Baja',    color: '#A9A097' },
+};
+
+// ── Observaciones de personas ───────────────────────────────────────────────
+const OBS_CFG: Record<string, { label: string; color: string }> = {
+  ERROR:      { label: 'Error',      color: '#b91c1c' },
+  COMPROMISO: { label: 'Compromiso', color: '#a16207' },
+};
+
+/** "2026-06-01" → "01 jun". Fechas cortas para no romper las filas. */
+const fechaCorta = (iso?: string | null) => {
+  if (!iso) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return '';
+  const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  return `${Number(m[3])} ${MESES[Number(m[2]) - 1] ?? ''}`;
+};
 
 // "2026-W18" → "W18/2026" (más legible en el reporte)
 const semanaLabel = (iso?: string) =>
@@ -537,6 +643,75 @@ const styles = StyleSheet.create({
     fontSize: 8,
     textAlign: 'center',
   },
+
+  // ── Semáforo de proyectos ───────────────────────────────────────────────
+  saludGrid: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 10,
+  },
+  saludBox: {
+    flex: 1,
+    borderTopWidth: 3,
+    borderTopStyle: 'solid',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: '#E8E2D6',
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+  },
+  saludValue: {
+    fontSize: 17,
+    fontFamily: 'Helvetica-Bold',
+  },
+  saludLabel: {
+    fontSize: 7.5,
+    color: '#6B5540',
+    marginTop: 2,
+  },
+  // Fila de proyecto: nombre + fase/criticidad + estado
+  projRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderLeftWidth: 3,
+    borderLeftStyle: 'solid',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomStyle: 'solid',
+    borderBottomColor: '#EFEBE1',
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+  },
+  projName: {
+    flex: 1,
+    fontSize: 9,
+    color: '#2B2118',
+    paddingRight: 6,
+  },
+  projMeta: {
+    fontSize: 7.5,
+    color: '#8A7A66',
+    width: 128,
+  },
+  projTag: {
+    fontSize: 7.5,
+    fontFamily: 'Helvetica-Bold',
+    width: 92,
+    textAlign: 'right',
+  },
+  // Nota de sección vacía, más visible que emptyNote: la ausencia de datos
+  // en un reporte ejecutivo es información, no algo que deba pasar inadvertido.
+  gapNote: {
+    backgroundColor: '#FBF6E9',
+    borderLeftWidth: 3,
+    borderLeftStyle: 'solid',
+    borderLeftColor: '#C9A84C',
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    fontSize: 8.5,
+    color: '#6B5540',
+  },
 });
 
 // ── Componente principal ───────────────────────────────────────────────────
@@ -582,10 +757,55 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
   const comp = snap.comparison || null;
   const compHasData = !!comp && (comp.completadas.length + comp.avances.length + comp.nuevas.length + comp.regresiones.length) > 0;
 
+  // ── Semáforo de proyectos ──
+  // Los proyectos en pausa se cuentan aparte: no son un estado de salud, y
+  // mezclarlos en "Sin errores" es justo lo que hacía ilegible el tablero.
+  const proyectosVivos = projects.filter(p => p.fase !== 'PAUSA');
+  const proyectosPausa = projects.filter(p => p.fase === 'PAUSA');
+  const saludCount: Record<string, number> = { SIN_ERRORES: 0, EN_OBSERVACION: 0, CON_PENDIENTES: 0, URGENTE: 0 };
+  proyectosVivos.forEach(p => { saludCount[saludDe(p)]++; });
+
+  // Orden de atención: primero lo que arde, y dentro de cada estado lo más crítico.
+  const CRIT_ORDEN = ['CRITICA', 'ALTA', 'MEDIA', 'BAJA'];
+  const requierenAtencion = proyectosVivos
+    .filter(p => saludDe(p) !== 'SIN_ERRORES')
+    .sort((a, b) => {
+      const sa = SALUD_ORDEN.indexOf(saludDe(b) as any) - SALUD_ORDEN.indexOf(saludDe(a) as any);
+      if (sa !== 0) return sa;
+      return CRIT_ORDEN.indexOf(a.criticidad ?? 'MEDIA') - CRIT_ORDEN.indexOf(b.criticidad ?? 'MEDIA');
+    });
+
+  // ── Incidencias: abiertas primero, y solo las que son incidencia de verdad ──
+  const incidencias = (snap.incidencias || []).filter(e => e.tipo === 'INCIDENCIA');
+  const incidenciasAbiertas = incidencias.filter(e => !e.resuelto);
+  const SEV_ORDEN = ['CRITICA', 'ALTA', 'MEDIA', 'BAJA'];
+  const incidenciasOrden = [...incidencias].sort((a, b) => {
+    if (a.resuelto !== b.resuelto) return a.resuelto ? 1 : -1;
+    return SEV_ORDEN.indexOf(a.severidad) - SEV_ORDEN.indexOf(b.severidad);
+  });
+
+  // ── Liberaciones: más recientes primero ──
+  const liberaciones = [...(snap.liberaciones || [])]
+    .sort((a, b) => (b.releaseDate || '').localeCompare(a.releaseDate || ''));
+  const libCount: Record<string, number> = { EXITOSA: 0, EN_PROGRESO: 0, CON_ERRORES: 0, REVERTIDA: 0 };
+  liberaciones.forEach(l => { if (libCount[l.status] !== undefined) libCount[l.status]++; });
+
+  // ── Equipo ──
+  const equipo = snap.equipo || null;
+  const observaciones = equipo?.observaciones ?? [];
+
   // ── KPIs ──
   const kpiEnfoques = activeFocus.length;
   const kpiPrio     = prioritized.length;
   const kpiSemana   = weekTasks.length;
+  const kpiAlerta   = saludCount.URGENTE;
+  const kpiIncid    = incidenciasAbiertas.length;
+  const kpiAcuerdosMal = acuerdoCounts.INCUMPLIDO + acuerdoCounts.PENDIENTE + acuerdoCounts.PARCIAL;
+
+  // Avance global de la fábrica: tareas completadas sobre el total del plan.
+  const totalTareas = allTasks.length;
+  const completadas = allTasks.filter(t => DONE.includes(t.status)).length;
+  const pctAvance = totalTareas > 0 ? Math.round((completadas / totalTareas) * 100) : 0;
 
   const generatedDate = new Date(snap.savedAt).toLocaleDateString('es-MX', {
     weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
@@ -647,7 +867,7 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <Text style={styles.headerTitle}>SIGOB · Fábrica de Software</Text>
-            <Text style={styles.headerWeek}>Reporte semanal · {snap.week}</Text>
+            <Text style={styles.headerWeek}>Reporte ejecutivo · {snap.week}</Text>
           </View>
           <View style={styles.headerRight}>
             <Text style={styles.headerIso}>{snap.isoWeek}</Text>
@@ -656,11 +876,12 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
         </View>
         <View style={styles.goldStripe} />
 
-        {/* ── 2. Resumen ejecutivo ───────────────────────────────────── */}
+        {/* ── 2. Panorama ejecutivo ──────────────────────────────────── */}
+        {/* Seis cifras que responden "¿cómo estamos?" sin pasar de la primera página. */}
         <View style={styles.summaryRow}>
-          <View style={[styles.kpi, { borderLeftColor: '#C9A84C' }]}>
-            <Text style={styles.kpiValue}>{kpiEnfoques}</Text>
-            <Text style={styles.kpiLabel}>Enfoques</Text>
+          <View style={[styles.kpi, { borderLeftColor: '#15803d' }]}>
+            <Text style={styles.kpiValue}>{pctAvance}%</Text>
+            <Text style={styles.kpiLabel}>Avance del plan</Text>
           </View>
           <View style={[styles.kpi, { borderLeftColor: '#a16207' }]}>
             <Text style={styles.kpiValue}>{kpiSemana}</Text>
@@ -670,6 +891,73 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
             <Text style={styles.kpiValue}>{kpiPrio}</Text>
             <Text style={styles.kpiLabel}>Urgentes / Atrasadas</Text>
           </View>
+        </View>
+        <View style={[styles.summaryRow, { marginTop: -4 }]}>
+          <View style={[styles.kpi, { borderLeftColor: '#b91c1c' }]}>
+            <Text style={styles.kpiValue}>{kpiAlerta}</Text>
+            <Text style={styles.kpiLabel}>Proyectos en alerta</Text>
+          </View>
+          <View style={[styles.kpi, { borderLeftColor: '#c2410c' }]}>
+            <Text style={styles.kpiValue}>{kpiIncid}</Text>
+            <Text style={styles.kpiLabel}>Incidencias abiertas</Text>
+          </View>
+          <View style={[styles.kpi, { borderLeftColor: '#C9A84C' }]}>
+            <Text style={styles.kpiValue}>{kpiAcuerdosMal}</Text>
+            <Text style={styles.kpiLabel}>Acuerdos sin cerrar</Text>
+          </View>
+        </View>
+
+        {/* ── 2b. Estado de salud de los proyectos ───────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Estado de salud de los proyectos</Text>
+          <Text style={styles.sectionIntro}>
+            Semáforo operativo de los {proyectosVivos.length} proyecto{proyectosVivos.length !== 1 ? 's' : ''} activo
+            {proyectosVivos.length !== 1 ? 's' : ''}
+            {proyectosPausa.length > 0 ? ` · ${proyectosPausa.length} en pausa, fuera del conteo` : ''}.
+          </Text>
+
+          {projects.length === 0 ? (
+            <Text style={styles.gapNote}>
+              Sin proyectos registrados. El semáforo operativo no tiene datos que reportar.
+            </Text>
+          ) : (
+            <>
+              <View style={styles.saludGrid} wrap={false}>
+                {SALUD_ORDEN.map(s => (
+                  <View key={s} style={[styles.saludBox, { borderTopColor: SALUD_CFG[s].color }]}>
+                    <Text style={[styles.saludValue, { color: saludCount[s] > 0 ? SALUD_CFG[s].color : '#C4BCAE' }]}>
+                      {saludCount[s]}
+                    </Text>
+                    <Text style={styles.saludLabel}>{SALUD_CFG[s].label}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {requierenAtencion.length === 0 ? (
+                <Text style={styles.emptyNote}>
+                  Ningún proyecto activo requiere atención: todos en verde.
+                </Text>
+              ) : (
+                <>
+                  <Text style={[styles.sectionIntro, { marginTop: 2 }]}>
+                    Requieren atención, del más grave al menos grave:
+                  </Text>
+                  {requierenAtencion.map((p, i) => {
+                    const s = saludDe(p);
+                    const meta = [FASE_LABEL[p.fase ?? ''] ?? p.fase, CRIT_LABEL[p.criticidad ?? ''] ?? p.criticidad]
+                      .filter(Boolean).join('  ·  ');
+                    return (
+                      <View key={i} style={[styles.projRow, { borderLeftColor: SALUD_CFG[s].color }]} wrap={false}>
+                        <Text style={styles.projName}>{p.name.substring(0, 62)}</Text>
+                        <Text style={styles.projMeta}>{meta}</Text>
+                        <Text style={[styles.projTag, { color: SALUD_CFG[s].color }]}>{SALUD_CFG[s].label}</Text>
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+            </>
+          )}
         </View>
 
         {/* ── 3. Enfoques de la semana (objetivos) ───────────────────── */}
@@ -735,7 +1023,7 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
                 return (
                   <>
                     {/* Resumen por estado */}
-                    <View style={styles.miniKpiRow}>
+                    <View style={styles.miniKpiRow} wrap={false}>
                       {ACUERDO_ORDER.map(st => (
                         <View key={st} style={[styles.miniKpi, { borderLeftColor: ACUERDO_ACCENT[acuerdoSev(st)] }]}>
                           <Text style={styles.miniKpiValue}>{acuerdoCounts[st]}</Text>
@@ -773,7 +1061,7 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
               : (
                 <>
                   {/* KPIs del avance */}
-                  <View style={styles.miniKpiRow}>
+                  <View style={styles.miniKpiRow} wrap={false}>
                     {compGroups.map(g => (
                       <View key={g.label} style={[styles.miniKpi, { borderLeftColor: g.color }]}>
                         <Text style={styles.miniKpiValue}>{g.count}</Text>
@@ -821,7 +1109,9 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
         )}
 
         {/* ── 7. Carga por Célula ────────────────────────────────────── */}
-        <View style={styles.section}>
+        {/* Sin wrap: son pocas filas y partir la tabla deja la cabecera huérfana
+            en la página anterior, que es justo donde se leen los números. */}
+        <View style={styles.section} wrap={false}>
           <Text style={styles.sectionTitle}>Carga por Célula</Text>
           <View style={styles.tableHeader}>
             <Text style={styles.tableHeaderCell}>Célula</Text>
@@ -845,7 +1135,148 @@ export default function PdfTemplate({ snap }: { snap: CheckpointSnap }) {
           })}
         </View>
 
-        {/* ── 8. Footer ──────────────────────────────────────────────── */}
+        {/* ── 8. Incidencias registradas ─────────────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Incidencias registradas</Text>
+          <Text style={styles.sectionIntro}>
+            Bitácora operativa de los proyectos. Las abiertas van primero.
+          </Text>
+          {incidencias.length === 0 ? (
+            <Text style={styles.gapNote}>
+              Sin incidencias registradas en la bitácora de proyectos. Si hubo incidentes esta
+              semana, no quedaron capturados en el sistema.
+            </Text>
+          ) : (
+            <>
+              <View style={styles.miniKpiRow} wrap={false}>
+                <View style={styles.miniKpi}>
+                  <Text style={[styles.miniKpiValue, { color: '#b91c1c' }]}>{incidenciasAbiertas.length}</Text>
+                  <Text style={styles.miniKpiLabel}>Abiertas</Text>
+                </View>
+                <View style={styles.miniKpi}>
+                  <Text style={[styles.miniKpiValue, { color: '#15803d' }]}>{incidencias.length - incidenciasAbiertas.length}</Text>
+                  <Text style={styles.miniKpiLabel}>Resueltas</Text>
+                </View>
+              </View>
+              {incidenciasOrden.slice(0, 18).map((e, i) => {
+                const sv = SEVERIDAD_CFG[e.severidad] ?? SEVERIDAD_CFG.BAJA;
+                const proj = projectById[e.proyectoId];
+                const meta = [proj, fechaCorta(e.fecha ?? e.createdAt), e.resuelto ? 'Resuelta' : 'Abierta']
+                  .filter(Boolean).join('  ·  ');
+                return (
+                  <View key={i} style={[styles.projRow, { borderLeftColor: e.resuelto ? '#A9A097' : sv.color }]} wrap={false}>
+                    <Text style={styles.projName}>{e.titulo.substring(0, 62)}</Text>
+                    <Text style={styles.projMeta}>{meta}</Text>
+                    <Text style={[styles.projTag, { color: e.resuelto ? '#A9A097' : sv.color }]}>{sv.label}</Text>
+                  </View>
+                );
+              })}
+              {incidenciasOrden.length > 18 && (
+                <Text style={styles.compMore}>+{incidenciasOrden.length - 18} incidencia(s) más</Text>
+              )}
+            </>
+          )}
+        </View>
+
+        {/* ── 9. Liberaciones ────────────────────────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Liberaciones registradas</Text>
+          <Text style={styles.sectionIntro}>Entregas a producción y su resultado.</Text>
+          {liberaciones.length === 0 ? (
+            <Text style={styles.gapNote}>
+              Sin liberaciones registradas. Si hubo entregas a producción, no están capturadas
+              en el módulo de liberaciones.
+            </Text>
+          ) : (
+            <>
+              <View style={styles.miniKpiRow} wrap={false}>
+                {(['EXITOSA', 'EN_PROGRESO', 'CON_ERRORES', 'REVERTIDA'] as const).map(k => (
+                  <View key={k} style={styles.miniKpi}>
+                    <Text style={[styles.miniKpiValue, { color: libCount[k] > 0 ? LIB_CFG[k].color : '#C4BCAE' }]}>
+                      {libCount[k]}
+                    </Text>
+                    <Text style={styles.miniKpiLabel}>{LIB_CFG[k].label}</Text>
+                  </View>
+                ))}
+              </View>
+              {liberaciones.slice(0, 15).map((l, i) => {
+                const cfg = LIB_CFG[l.status] ?? LIB_CFG.EN_PROGRESO;
+                const proj = projectById[l.projectId];
+                const meta = [proj, l.version, fechaCorta(l.releaseDate)].filter(Boolean).join('  ·  ');
+                return (
+                  <View key={i} style={[styles.projRow, { borderLeftColor: cfg.color }]} wrap={false}>
+                    <Text style={styles.projName}>{(l.title || 'Liberación').substring(0, 62)}</Text>
+                    <Text style={styles.projMeta}>{meta}</Text>
+                    <Text style={[styles.projTag, { color: cfg.color }]}>{cfg.label}</Text>
+                  </View>
+                );
+              })}
+              {liberaciones.length > 15 && (
+                <Text style={styles.compMore}>+{liberaciones.length - 15} liberación(es) más</Text>
+              )}
+            </>
+          )}
+        </View>
+
+        {/* ── 10. Estado del equipo ──────────────────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Estado del equipo</Text>
+          <Text style={styles.sectionIntro}>
+            Observaciones abiertas: errores registrados y compromisos sin cerrar.
+          </Text>
+          {!equipo || equipo.totalPersonas === 0 ? (
+            <Text style={styles.gapNote}>
+              Sin personal dado de alta en el módulo de personas. No hay observaciones que
+              reportar sobre el equipo.
+            </Text>
+          ) : (
+            <>
+              <View style={styles.miniKpiRow} wrap={false}>
+                <View style={styles.miniKpi}>
+                  <Text style={styles.miniKpiValue}>{equipo.activos}</Text>
+                  <Text style={styles.miniKpiLabel}>Activos</Text>
+                </View>
+                <View style={styles.miniKpi}>
+                  <Text style={[styles.miniKpiValue, { color: observaciones.length > 0 ? '#b91c1c' : '#15803d' }]}>
+                    {observaciones.length}
+                  </Text>
+                  <Text style={styles.miniKpiLabel}>Observaciones</Text>
+                </View>
+                <View style={styles.miniKpi}>
+                  <Text style={[styles.miniKpiValue, { color: '#15803d' }]}>{equipo.positivos}</Text>
+                  <Text style={styles.miniKpiLabel}>Aciertos / apoyos</Text>
+                </View>
+              </View>
+              {observaciones.length === 0 ? (
+                <Text style={styles.emptyNote}>
+                  Sin observaciones abiertas: ningún error ni compromiso pendiente registrado.
+                </Text>
+              ) : (
+                observaciones.slice(0, 15).map((o, i) => {
+                  const cfg = OBS_CFG[o.tipo] ?? OBS_CFG.COMPROMISO;
+                  const meta = [o.celulaName, o.puesto, fechaCorta(o.fecha)].filter(Boolean).join('  ·  ');
+                  return (
+                    <View key={i} style={[styles.projRow, { borderLeftColor: cfg.color }]} wrap={false}>
+                      <View style={{ flex: 1, paddingRight: 6 }}>
+                        <Text style={styles.projName}>
+                          {o.persona}
+                          <Text style={{ color: '#8A7A66' }}>{`  —  ${o.title.substring(0, 52)}`}</Text>
+                        </Text>
+                      </View>
+                      <Text style={styles.projMeta}>{meta}</Text>
+                      <Text style={[styles.projTag, { color: cfg.color }]}>{cfg.label}</Text>
+                    </View>
+                  );
+                })
+              )}
+              {observaciones.length > 15 && (
+                <Text style={styles.compMore}>+{observaciones.length - 15} observación(es) más</Text>
+              )}
+            </>
+          )}
+        </View>
+
+        {/* ── 11. Footer ─────────────────────────────────────────────── */}
         <View style={styles.footer} fixed>
           <View style={styles.footerSeparator} />
           <Text

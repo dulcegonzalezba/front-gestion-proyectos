@@ -1050,7 +1050,46 @@ export default function App() {
         }
       } catch { /* sin comparativa si falla la red */ }
 
-      const snapForPdf = { ...snap, acuerdos: acuerdos || [], projects, comparison };
+      // Estado vivo de la fábrica: semáforo, incidencias, liberaciones y equipo.
+      // Va aparte del snapshot porque el checkpoint solo guarda el plan semanal, y
+      // el reporte ejecutivo debe reflejar cómo está la fábrica HOY. Cada bloque
+      // falla por separado: que no haya personas no debe dejar sin incidencias.
+      const estadoVivo = await (async () => {
+        const token = getToken();
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+        const pedir = async (url: string) => {
+          try {
+            const r = await fetch(url, { headers });
+            return r.ok ? await r.json() : null;
+          } catch { return null; }
+        };
+        const [proyectosVivos, incidencias, liberaciones, equipo] = await Promise.all([
+          pedir('/api/projects'),
+          pedir('/api/projects/eventos/recientes?limit=200'),
+          pedir('/api/liberaciones'),
+          pedir('/api/personas/observaciones'),
+        ]);
+        return { proyectosVivos, incidencias, liberaciones, equipo };
+      })();
+
+      // El semáforo se toma del estado actual; el snapshot solo aporta las
+      // asociaciones tarea↔proyecto, que sí son propias de esa semana.
+      const projectsConSalud = Array.isArray(estadoVivo.proyectosVivos)
+        ? estadoVivo.proyectosVivos.map((vivo: any) => {
+            const delSnap = projects.find((p: any) => p.id === vivo.id);
+            return { ...vivo, taskRefs: delSnap?.taskRefs ?? vivo.taskRefs };
+          })
+        : projects;
+
+      const snapForPdf = {
+        ...snap,
+        acuerdos: acuerdos || [],
+        projects: projectsConSalud,
+        comparison,
+        incidencias: estadoVivo.incidencias || [],
+        liberaciones: estadoVivo.liberaciones || [],
+        equipo: estadoVivo.equipo || null,
+      };
       const blob = await pdf(<PdfTemplate snap={snapForPdf} />).toBlob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
