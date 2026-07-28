@@ -162,14 +162,15 @@
   to   { opacity: 1; }
 }
 
+/* Cuatro columnas desde que "Con errores" se fusionó con "Alerta / Bloqueado". */
 .sigob-semaforo {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 .sigob-board {
   display: grid;
-  grid-template-columns: repeat(5, minmax(232px, 1fr));
+  grid-template-columns: repeat(4, minmax(232px, 1fr));
   gap: 12px;
   align-items: start;
   overflow-x: auto;
@@ -179,7 +180,7 @@
 .sigob-drawer { width: min(560px, 100vw); animation: sigob-drawer-in 0.18s ease-out; }
 
 @media (max-width: 1200px) {
-  .sigob-semaforo { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sigob-semaforo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
   .sigob-semaforo { grid-template-columns: repeat(2, minmax(0, 1fr)); }

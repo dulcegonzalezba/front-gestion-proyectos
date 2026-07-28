@@ -5,11 +5,16 @@
  */
 import { getToken } from "./auth";
 
+/**
+ * El eje del semáforo es "qué tipo de atención necesita", no "qué tan grave es"
+ * — la gravedad la lleva `Criticidad` aparte. Por eso no hay un CON_ERRORES
+ * separado de URGENTE: eran el mismo concepto partido en dos. El backend migra
+ * los registros antiguos, y `salud()` cubre los que lleguen en caché.
+ */
 export type Salud =
   | "SIN_ERRORES"
   | "EN_OBSERVACION"
   | "CON_PENDIENTES"
-  | "CON_ERRORES"
   | "URGENTE";
 
 export type Criticidad = "CRITICA" | "ALTA" | "MEDIA" | "BAJA";
@@ -26,6 +31,10 @@ export interface Project {
   saludUpdatedAt?: string | null;
   criticidad?: Criticidad;
   fase?: Fase;
+  /** true si la fase PAUSA la puso el barrido automático y no una persona. */
+  pausaAuto?: boolean;
+  /** Fase que se restaura al salir de una pausa automática. */
+  fasePrevia?: Fase | null;
   notas?: string;
 }
 
@@ -59,18 +68,34 @@ export const UI = {
   gold: "#C9A84C",
 } as const;
 
-export const SALUD_CFG: Record<Salud, { label: string; short: string; color: string; bg: string; icon: string }> = {
-  SIN_ERRORES:    { label: "Sin errores",       short: "OK",        color: "#22C55E", bg: "rgba(34,197,94,0.10)",  icon: "✓" },
-  EN_OBSERVACION: { label: "En observación",    short: "Observado", color: "#60A5FA", bg: "rgba(96,165,250,0.10)", icon: "◉" },
-  CON_PENDIENTES: { label: "Con pendientes",    short: "Pendiente", color: "#F59E0B", bg: "rgba(245,158,11,0.10)", icon: "▲" },
-  CON_ERRORES:    { label: "Con errores",       short: "Errores",   color: "#F97316", bg: "rgba(249,115,22,0.10)", icon: "!" },
-  URGENTE:        { label: "Urgente / Bloqueado", short: "Urgente", color: "#EF4444", bg: "rgba(239,68,68,0.12)",  icon: "⬤" },
+export const SALUD_CFG: Record<Salud, {
+  label: string; short: string; color: string; bg: string; icon: string; ayuda: string;
+}> = {
+  SIN_ERRORES: {
+    label: "Sin errores", short: "OK", color: "#22C55E", bg: "rgba(34,197,94,0.10)", icon: "✓",
+    ayuda: "Operando con normalidad, sin nada que atender.",
+  },
+  EN_OBSERVACION: {
+    label: "En observación", short: "Observado", color: "#60A5FA", bg: "rgba(96,165,250,0.10)", icon: "◉",
+    ayuda: "Vigilado de cerca — típicamente desarrollo a punto de salir a producción.",
+  },
+  CON_PENDIENTES: {
+    label: "Con pendientes", short: "Pendiente", color: "#F59E0B", bg: "rgba(245,158,11,0.10)", icon: "▲",
+    ayuda: "Algo lo está bloqueando y no está fluyendo, pero no hay servicio caído.",
+  },
+  URGENTE: {
+    label: "Alerta / Bloqueado", short: "Alerta", color: "#EF4444", bg: "rgba(239,68,68,0.12)", icon: "⬤",
+    ayuda: "Producción afectada o bloqueo crítico. Requiere atención hoy.",
+  },
 };
 
 /** Orden de columnas: lo más sano a la izquierda, lo que arde a la derecha. */
 export const SALUD_ORDEN: Salud[] = [
-  "SIN_ERRORES", "EN_OBSERVACION", "CON_PENDIENTES", "CON_ERRORES", "URGENTE",
+  "SIN_ERRORES", "EN_OBSERVACION", "CON_PENDIENTES", "URGENTE",
 ];
+
+/** Valores de salud retirados y su destino, por si llega uno en caché o en un payload viejo. */
+const SALUD_LEGACY: Record<string, Salud> = { CON_ERRORES: "URGENTE" };
 
 export const CRITICIDAD_CFG: Record<Criticidad, { label: string; color: string }> = {
   CRITICA: { label: "Crítica", color: "#EF4444" },
@@ -108,11 +133,28 @@ export const TASK_ACTIVE  = ["EN_CURSO", "ACTIVO", "SEGUIMIENTO", "COORDINADO", 
 /** Días sin tocar el semáforo a partir de los cuales la tarjeta avisa. */
 export const DIAS_STALE = 7;
 
+/**
+ * Días sin movimiento tras los cuales el backend manda un proyecto sano a
+ * stand-by. Debe coincidir con UMBRAL_STANDBY_DIAS del servidor; aquí solo se
+ * usa para redactar los textos de ayuda.
+ */
+export const DIAS_STANDBY = 21;
+
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
-export const salud     = (p: Project): Salud      => (p.salud && SALUD_CFG[p.salud] ? p.salud : "SIN_ERRORES");
+export const salud = (p: Project): Salud => {
+  if (!p.salud) return "SIN_ERRORES";
+  if (SALUD_CFG[p.salud]) return p.salud;
+  return SALUD_LEGACY[p.salud as string] ?? "SIN_ERRORES";
+};
 export const criticidad = (p: Project): Criticidad => (p.criticidad && CRITICIDAD_CFG[p.criticidad] ? p.criticidad : "MEDIA");
 export const fase      = (p: Project): Fase       => (p.fase && FASE_CFG[p.fase] ? p.fase : "DESARROLLO");
+
+/**
+ * Un proyecto está en stand-by si su fase es PAUSA, la haya puesto una persona
+ * o el barrido automático. Es el criterio que usa el tablero para ocultarlo.
+ */
+export const enPausa = (p: Project): boolean => fase(p) === "PAUSA";
 
 // ── Fechas ───────────────────────────────────────────────────────────────────
 

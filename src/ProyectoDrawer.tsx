@@ -4,7 +4,7 @@ import {
   UI, SALUD_CFG, SALUD_ORDEN, CRITICIDAD_CFG, FASE_CFG, TIPO_CFG, SEVERIDAD_CFG,
   TASK_BLOCKED, TASK_DONE, TASK_ACTIVE,
   salud as saludDe, criticidad as critDe, fase as faseDe,
-  fmtFecha, fmtFechaHora, fmtHace, hoyISO,
+  fmtFecha, fmtFechaHora, fmtHace, hoyISO, authHeaders,
 } from "./proyectoEstado";
 
 interface EstadoPatch {
@@ -30,6 +30,20 @@ interface Props {
   onDeleteEvento: (evento: Evento) => Promise<void>;
   onAssociateTask: (projectId: string, cellName: string, taskId: string) => Promise<void>;
   onCreateTask: (projectId: string, cellName: string, t: { title: string; resp: string; status: string }) => Promise<void>;
+  /** Borra el proyecto y todo lo que cuelga de él. Cierra el drawer al terminar. */
+  onDeleteProject: (project: Project) => Promise<void>;
+}
+
+/** Inventario de lo que se llevaría el borrado, tal como lo devuelve el backend. */
+export interface ResumenEliminacion {
+  proyecto: string;
+  eventos: number;
+  acuerdos: number;
+  acuerdoSeguimientos: number;
+  liberaciones: number;
+  liberacionSeguimientos: number;
+  personaEventosDesvinculados: number;
+  tareasDesasociadas: number;
 }
 
 const TASK_STATUSES = ["PENDIENTE", "EN_CURSO", "ESTA_SEMANA", "ALTA_PRIORIDAD", "URGENTE", "BLOQUEADO", "COMPLETADO"];
@@ -69,7 +83,7 @@ const btnGhost: CSSProperties = {
 export default function ProyectoDrawer({
   project, d, checklistItems, eventos, loadingEventos,
   onClose, onEstado, onAddEvento, onToggleResuelto, onDeleteEvento,
-  onAssociateTask, onCreateTask,
+  onAssociateTask, onCreateTask, onDeleteProject,
 }: Props) {
   const sal  = saludDe(project);
   const crit = critDe(project);
@@ -87,6 +101,13 @@ export default function ProyectoDrawer({
   const [filtro, setFiltro] = useState<"TODO" | EventoTipo>("TODO");
   const [confirmDel, setConfirmDel] = useState<number | null>(null);
 
+  // Borrado en tres pasos: abrir, ver el inventario, teclear el nombre.
+  const [zonaRiesgo, setZonaRiesgo] = useState(false);
+  const [preview, setPreview] = useState<ResumenEliminacion | null>(null);
+  const [previewError, setPreviewError] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+  const [borrando, setBorrando] = useState(false);
+
   const [asocCell, setAsocCell] = useState("");
   const [asocTask, setAsocTask] = useState("");
   const [creandoTarea, setCreandoTarea] = useState(false);
@@ -100,7 +121,26 @@ export default function ProyectoDrawer({
     setComposerTipo(null);
     setFiltro("TODO");
     setAsocCell(""); setAsocTask(""); setCreandoTarea(false);
+    setZonaRiesgo(false); setPreview(null); setPreviewError(false); setConfirmName("");
   }, [project.id]);
+
+  // El inventario se pide solo al abrir la zona de riesgo: es una consulta que
+  // no vale la pena hacer cada vez que alguien mira un proyecto.
+  useEffect(() => {
+    if (!zonaRiesgo || preview) return;
+    let cancelado = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${project.id}/eliminacion-preview`, { headers: authHeaders() });
+        if (!res.ok) throw new Error();
+        const data: ResumenEliminacion = await res.json();
+        if (!cancelado) { setPreview(data); setPreviewError(false); }
+      } catch {
+        if (!cancelado) setPreviewError(true);
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [zonaRiesgo, preview, project.id]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -685,6 +725,118 @@ export default function ProyectoDrawer({
               })}
             </div>
           )}
+
+          {/* ── Zona de riesgo ───────────────────────────────────────────── */}
+          <div style={{ marginTop: 28, paddingTop: 18, borderTop: `1px solid ${UI.border}` }}>
+            {!zonaRiesgo ? (
+              <button
+                onClick={() => setZonaRiesgo(true)}
+                style={{ ...btnGhost, color: "#EF4444", borderColor: "rgba(239,68,68,0.28)" }}
+              >
+                Eliminar proyecto…
+              </button>
+            ) : (
+              <div style={{
+                border: "1px solid rgba(239,68,68,0.35)", borderRadius: 10,
+                background: "rgba(239,68,68,0.04)", padding: "14px 15px",
+              }}>
+                <div style={{ ...sectionTitle, color: "#EF4444", marginBottom: 8 }}>
+                  Eliminar proyecto
+                </div>
+
+                {previewError ? (
+                  <div style={{ fontSize: 11.5, color: "#F59E0B", marginBottom: 12 }}>
+                    No se pudo consultar qué se borraría. Mejor no continuar hasta saberlo:
+                    revisa la conexión y vuelve a abrir esta sección.
+                  </div>
+                ) : !preview ? (
+                  <div style={{ fontSize: 11.5, color: UI.muted, marginBottom: 12 }}>
+                    Calculando qué se borraría…
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 11.5, color: UI.text, marginBottom: 10, lineHeight: 1.5 }}>
+                      Esto es permanente y no se puede deshacer. Se eliminará:
+                    </div>
+                    <ul style={{
+                      margin: "0 0 10px", paddingLeft: 18,
+                      fontSize: 11.5, color: UI.muted, lineHeight: 1.7,
+                    }}>
+                      <li>El proyecto <strong style={{ color: UI.text }}>{project.name}</strong></li>
+                      <FilaBorrado n={preview.eventos} singular="entrada de bitácora" plural="entradas de bitácora" />
+                      <FilaBorrado n={preview.acuerdos} singular="acuerdo" plural="acuerdos" />
+                      <FilaBorrado n={preview.acuerdoSeguimientos} singular="seguimiento de acuerdo" plural="seguimientos de acuerdos" />
+                      <FilaBorrado n={preview.liberaciones} singular="liberación" plural="liberaciones" />
+                      <FilaBorrado n={preview.liberacionSeguimientos} singular="seguimiento de liberación" plural="seguimientos de liberaciones" />
+                    </ul>
+
+                    {(preview.personaEventosDesvinculados > 0 || preview.tareasDesasociadas > 0) && (
+                      <div style={{
+                        fontSize: 11, color: UI.muted, lineHeight: 1.6,
+                        background: UI.surface2, border: `1px solid ${UI.border}`,
+                        borderRadius: 8, padding: "9px 11px", marginBottom: 12,
+                      }}>
+                        <strong style={{ color: UI.text }}>No se borra:</strong>
+                        {preview.tareasDesasociadas > 0 && (
+                          <div>
+                            · {preview.tareasDesasociadas} tarea{preview.tareasDesasociadas !== 1 ? "s" : ""} del
+                            plan semanal — solo pierden la asociación.
+                          </div>
+                        )}
+                        {preview.personaEventosDesvinculados > 0 && (
+                          <div>
+                            · {preview.personaEventosDesvinculados} evento
+                            {preview.personaEventosDesvinculados !== 1 ? "s" : ""} de personas — es su historial,
+                            solo se le quita la referencia al proyecto.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <label style={{ display: "block", fontSize: 11, color: UI.muted, marginBottom: 6 }}>
+                      Escribe <strong style={{ color: UI.text }}>{project.name}</strong> para confirmar:
+                    </label>
+                    <input
+                      value={confirmName}
+                      onChange={e => setConfirmName(e.target.value)}
+                      placeholder={project.name}
+                      aria-label="Confirmar nombre del proyecto"
+                      style={{ ...field, marginBottom: 12 }}
+                    />
+                  </>
+                )}
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    disabled={!preview || confirmName.trim() !== project.name.trim() || borrando}
+                    onClick={async () => {
+                      setBorrando(true);
+                      try { await onDeleteProject(project); }
+                      finally { setBorrando(false); }
+                    }}
+                    style={{
+                      background: confirmName.trim() === project.name.trim() && preview ? "#EF4444" : UI.surface2,
+                      border: `1px solid ${confirmName.trim() === project.name.trim() && preview ? "#EF4444" : UI.border}`,
+                      borderRadius: 8,
+                      color: confirmName.trim() === project.name.trim() && preview ? "#fff" : UI.dim,
+                      cursor: confirmName.trim() === project.name.trim() && preview && !borrando ? "pointer" : "not-allowed",
+                      fontSize: 11.5, fontWeight: 600, padding: "8px 14px",
+                      fontFamily: "system-ui,sans-serif",
+                    }}
+                  >
+                    {borrando ? "Eliminando…" : "Eliminar definitivamente"}
+                  </button>
+                  <button
+                    onClick={() => { setZonaRiesgo(false); setConfirmName(""); }}
+                    disabled={borrando}
+                    style={btnGhost}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </aside>
     </>
@@ -692,6 +844,12 @@ export default function ProyectoDrawer({
 }
 
 // ── Subcomponentes ───────────────────────────────────────────────────────────
+
+/** Renglón del inventario de borrado. Lo que está en cero no se menciona. */
+function FilaBorrado({ n, singular, plural }: { n: number; singular: string; plural: string }) {
+  if (!n) return null;
+  return <li>{n} {n === 1 ? singular : plural}</li>;
+}
 
 function Pill({ color, bg, label }: { color: string; bg: string; label: string }) {
   return (

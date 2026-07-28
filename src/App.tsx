@@ -707,6 +707,10 @@ export default function App() {
     setProjects(prev => prev.map(p => (p.id === updated.id ? { ...p, ...updated } : p)));
   };
 
+  const handleProjectDeleted = (id: string) => {
+    setProjects(prev => prev.filter(p => p.id !== id));
+  };
+
   const BASE_PROJECTS = [
     "SIR — Portal, Admin, Reporteador, BI",
     "SIR Navojoa",
@@ -3858,6 +3862,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
                 selectedProject={selectedProject}
                 onSelectProject={id => { setSelectedProject(id); setAssociatingCell(""); setAssociatingTask(""); }}
                 onProjectUpdated={handleProjectUpdated}
+                onProjectDeleted={handleProjectDeleted}
                 onAssociateTask={associateTaskToProject}
                 onCreateTask={createTaskForProject}
               />

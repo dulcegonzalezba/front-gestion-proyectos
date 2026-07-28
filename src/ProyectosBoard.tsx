@@ -4,8 +4,8 @@ import ProyectoDrawer from "./ProyectoDrawer";
 import {
   Project, Evento, Salud, Criticidad, Fase, EventoTipo, Severidad,
   UI, SALUD_CFG, SALUD_ORDEN, CRITICIDAD_CFG, FASE_CFG, TIPO_CFG, SEVERIDAD_CFG,
-  TASK_BLOCKED, TASK_DONE, TASK_ACTIVE, DIAS_STALE,
-  salud as saludDe, criticidad as critDe, fase as faseDe,
+  TASK_BLOCKED, TASK_DONE, TASK_ACTIVE, DIAS_STALE, DIAS_STANDBY,
+  salud as saludDe, criticidad as critDe, fase as faseDe, enPausa,
   fmtFecha, fmtHace, diasDesde, authHeaders,
 } from "./proyectoEstado";
 
@@ -17,6 +17,8 @@ interface Props {
   selectedProject: string;
   onSelectProject: (id: string) => void;
   onProjectUpdated: (p: Project) => void;
+  /** Quita el proyecto de la lista tras borrarlo en el servidor. */
+  onProjectDeleted: (id: string) => void;
   onAssociateTask: (projectId: string, cellName: string, taskId: string) => Promise<void>;
   onCreateTask: (projectId: string, cellName: string, t: { title: string; resp: string; status: string }) => Promise<void>;
 }
@@ -44,7 +46,7 @@ const sectionTitle: CSSProperties = {
 
 export default function ProyectosBoard({
   projects, d, checklistItems, selectedProject, onSelectProject,
-  onProjectUpdated, onAssociateTask, onCreateTask,
+  onProjectUpdated, onProjectDeleted, onAssociateTask, onCreateTask,
 }: Props) {
   const [abiertas, setAbiertas]   = useState<Evento[]>([]);
   const [recientes, setRecientes] = useState<Evento[]>([]);
@@ -54,6 +56,8 @@ export default function ProyectosBoard({
   const [focoSalud, setFocoSalud] = useState<Salud | null>(null);
   const [vista, setVista] = useState<"tablero" | "lista">("tablero");
   const [verActividad, setVerActividad] = useState(true);
+  /** El stand-by se oculta por defecto: es justo el ruido que satura "Sin errores". */
+  const [ocultarPausa, setOcultarPausa] = useState(true);
 
   // ── Drag & drop ───────────────────────────────────────────────────────────
   const [arrastrando, setArrastrando]   = useState<string | null>(null);
@@ -125,10 +129,20 @@ export default function ProyectosBoard({
   }, [projects]);
 
   // ── Filtrado + agrupación ─────────────────────────────────────────────────
-  const filtrados = useMemo(() => {
+
+  /** Coinciden con la búsqueda, estén en stand-by o no. */
+  const coincidentes = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     return projects.filter(p => !q || p.name.toLowerCase().includes(q));
   }, [projects, busqueda]);
+
+  const pausados = useMemo(() => coincidentes.filter(enPausa), [coincidentes]);
+
+  /** Lo que realmente se pinta. Todo lo demás del tablero cuelga de aquí. */
+  const filtrados = useMemo(
+    () => (ocultarPausa ? coincidentes.filter(p => !enPausa(p)) : coincidentes),
+    [coincidentes, ocultarPausa],
+  );
 
   /** Salud a pintar: la optimista mientras el servidor confirma, si no la real. */
   const saludEf = useCallback(
@@ -261,6 +275,35 @@ export default function ProyectosBoard({
     } catch { toast.error("Error de red"); }
   };
 
+  /**
+   * Borra el proyecto en cascada. El drawer ya confirmó con el usuario, así que
+   * aquí solo queda ejecutar, cerrar y contar qué se fue.
+   */
+  const deleteProject = async (p: Project) => {
+    try {
+      const res = await fetch(`/api/projects/${p.id}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (!res.ok) { toast.error(`No se pudo eliminar ${p.name}`); return; }
+
+      const resumen = await res.json().catch(() => null);
+      const arrastrados = resumen
+        ? resumen.eventos + resumen.acuerdos + resumen.acuerdoSeguimientos
+          + resumen.liberaciones + resumen.liberacionSeguimientos
+        : 0;
+
+      onSelectProject("Todos");
+      onProjectDeleted(p.id);
+      toast.success(
+        arrastrados > 0
+          ? `${p.name} eliminado · ${arrastrados} registro${arrastrados !== 1 ? "s" : ""} asociado${arrastrados !== 1 ? "s" : ""}`
+          : `${p.name} eliminado`,
+      );
+      await cargarAgregados();
+    } catch { toast.error("Error de red al eliminar el proyecto"); }
+  };
+
   const deleteEvento = async (ev: Evento) => {
     try {
       const res = await fetch(`/api/projects/eventos/${ev.id}`, {
@@ -289,6 +332,7 @@ export default function ProyectosBoard({
             {filtrados.length} proyecto{filtrados.length !== 1 ? "s" : ""}
             {abiertas.length > 0 && <> · <span style={{ color: "#EF4444" }}>{abiertas.length} incidencia{abiertas.length !== 1 ? "s" : ""} abierta{abiertas.length !== 1 ? "s" : ""}</span></>}
             {sinActualizar > 0 && <> · <span style={{ color: "#F59E0B" }}>{sinActualizar} sin actualizar</span></>}
+            {ocultarPausa && pausados.length > 0 && <> · <span style={{ color: UI.dim }}>{pausados.length} en pausa oculto{pausados.length !== 1 ? "s" : ""}</span></>}
           </div>
           {vista === "tablero" && (
             <div style={{ fontSize: 10, color: UI.dim, marginTop: 3 }}>
@@ -308,6 +352,38 @@ export default function ProyectosBoard({
             fontFamily: "system-ui,sans-serif",
           }}
         />
+
+        <button
+          onClick={() => setOcultarPausa(v => !v)}
+          aria-pressed={ocultarPausa}
+          title={
+            ocultarPausa
+              ? `Mostrar los ${pausados.length} proyecto(s) en pausa`
+              : "Ocultar los proyectos en pausa"
+          }
+          style={{
+            display: "flex", alignItems: "center", gap: 7,
+            background: ocultarPausa ? "rgba(201,168,76,0.12)" : UI.surface2,
+            border: `1px solid ${ocultarPausa ? "rgba(201,168,76,0.4)" : UI.border}`,
+            borderRadius: 8, cursor: "pointer",
+            color: ocultarPausa ? UI.gold : UI.muted,
+            fontSize: 11, fontWeight: ocultarPausa ? 600 : 400,
+            padding: "8px 12px", fontFamily: "system-ui,sans-serif", whiteSpace: "nowrap",
+          }}
+        >
+          <span style={{ fontSize: 10 }}>{ocultarPausa ? "◐" : "◯"}</span>
+          Ocultar en pausa
+          {pausados.length > 0 && (
+            <span style={{
+              fontSize: 9, fontWeight: 700,
+              background: ocultarPausa ? "rgba(201,168,76,0.2)" : UI.border,
+              color: ocultarPausa ? UI.gold : UI.muted,
+              borderRadius: 999, padding: "1px 6px",
+            }}>
+              {pausados.length}
+            </span>
+          )}
+        </button>
 
         <div style={{ display: "flex", background: UI.surface2, border: `1px solid ${UI.border}`, borderRadius: 8, padding: 2 }}>
           {(["tablero", "lista"] as const).map(v => (
@@ -341,7 +417,7 @@ export default function ProyectosBoard({
               className="sigob-tile"
               onClick={() => setFocoSalud(activo ? null : s)}
               aria-pressed={activo}
-              title={activo ? "Quitar filtro" : `Ver solo: ${cfg.label}`}
+              title={`${cfg.label} — ${cfg.ayuda}\n\n${activo ? "Clic para quitar el filtro" : "Clic para ver solo esta columna"}`}
               style={{
                 ...card,
                 borderColor: activo ? cfg.color : UI.border,
@@ -422,6 +498,20 @@ export default function ProyectosBoard({
       {projects.length === 0 ? (
         <div style={{ ...card, padding: "40px 20px", textAlign: "center", color: UI.muted, fontSize: 13 }}>
           Sin proyectos. Usa <span style={{ color: UI.gold }}>⚡ Precargar 17 base</span> en el panel izquierdo.
+        </div>
+      ) : filtrados.length === 0 && pausados.length > 0 ? (
+        <div style={{ ...card, padding: "40px 20px", textAlign: "center", color: UI.muted, fontSize: 13 }}>
+          Todo lo que coincide está en pausa.{" "}
+          <button
+            onClick={() => setOcultarPausa(false)}
+            style={{
+              background: "none", border: "none", padding: 0, cursor: "pointer",
+              color: UI.gold, fontSize: 13, fontFamily: "system-ui,sans-serif",
+              textDecoration: "underline",
+            }}
+          >
+            Mostrar los {pausados.length} en pausa
+          </button>
         </div>
       ) : vista === "tablero" ? (
         <div className={`sigob-board${focoSalud ? " sigob-board--focus" : ""}`}>
@@ -526,6 +616,7 @@ export default function ProyectosBoard({
           onDeleteEvento={deleteEvento}
           onAssociateTask={onAssociateTask}
           onCreateTask={onCreateTask}
+          onDeleteProject={deleteProject}
         />
       )}
     </div>
@@ -664,6 +755,7 @@ function TarjetaProyecto({
   const cfg  = SALUD_CFG[sal];
   const dias = diasDesde(project.saludUpdatedAt);
   const stale = dias === null || dias > DIAS_STALE;
+  const pausado = fas === "PAUSA";
 
   return (
     <div
@@ -671,13 +763,18 @@ function TarjetaProyecto({
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      title="Arrástrala a otra columna para cambiar el estatus"
+      title={
+        pausado
+          ? "En pausa. Arrástrala a otra columna para reactivarla."
+          : "Arrástrala a otra columna para cambiar el estatus"
+      }
       style={{
         ...card,
         borderLeft: `3px solid ${cfg.color}`,
         overflow: "hidden",
         cursor: arrastrandose ? "grabbing" : "grab",
-        opacity: arrastrandose ? 0.4 : 1,
+        // Atenuada, no invisible: se ve que sigue ahí sin competir por la atención.
+        opacity: arrastrandose ? 0.4 : pausado ? 0.55 : 1,
         transition: "opacity 0.12s",
         animation: incidenciasAbiertas > 0 && sal === "URGENTE" && !arrastrandose
           ? "sigob-alert-pulse 2.4s ease-in-out infinite" : "none",
@@ -716,8 +813,19 @@ function TarjetaProyecto({
 
         {/* Chips */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 7, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 9, color: FASE_CFG[fas].color, fontWeight: 600 }}>
-            {FASE_CFG[fas].label}
+          <span
+            title={
+              pausado
+                ? project.pausaAuto
+                  ? `Stand-by automático: ${DIAS_STANDBY}+ días sin movimiento estando sana. `
+                    + `Vuelve al tablero sola en cuanto tenga actividad`
+                    + `${project.fasePrevia ? `, restaurando la fase ${FASE_CFG[project.fasePrevia]?.label ?? project.fasePrevia}` : ""}.`
+                  : "En pausa manual. Solo una persona puede sacarla de aquí."
+                : undefined
+            }
+            style={{ fontSize: 9, color: FASE_CFG[fas].color, fontWeight: 600 }}
+          >
+            {pausado && project.pausaAuto ? "⏸ En pausa · auto" : pausado ? "⏸ En pausa" : FASE_CFG[fas].label}
           </span>
           <span style={{ color: UI.border, fontSize: 9 }}>|</span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -843,6 +951,7 @@ function Lista({
               alignItems: "center", cursor: "pointer", minWidth: 780,
               borderLeft: `2px solid ${cfg.color}`,
               background: inc > 0 ? "rgba(239,68,68,0.035)" : "transparent",
+              opacity: fas === "PAUSA" ? 0.55 : 1,
             }}
           >
             <span style={{ fontSize: 12, color: UI.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -872,7 +981,12 @@ function Lista({
               })}
             </span>
 
-            <span style={{ fontSize: 10, color: FASE_CFG[fas].color }}>{FASE_CFG[fas].label}</span>
+            <span
+              title={fas === "PAUSA" && p.pausaAuto ? `Stand-by automático: ${DIAS_STANDBY}+ días sin movimiento` : undefined}
+              style={{ fontSize: 10, color: FASE_CFG[fas].color }}
+            >
+              {fas === "PAUSA" && p.pausaAuto ? "⏸ Pausa · auto" : fas === "PAUSA" ? "⏸ Pausa" : FASE_CFG[fas].label}
+            </span>
             <span style={{ fontSize: 10, color: CRITICIDAD_CFG[crit].color, fontWeight: 600 }}>
               {CRITICIDAD_CFG[crit].label}
             </span>
