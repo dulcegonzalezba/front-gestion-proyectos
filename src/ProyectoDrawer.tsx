@@ -29,7 +29,7 @@ interface Props {
   onToggleResuelto: (evento: Evento) => Promise<void>;
   onDeleteEvento: (evento: Evento) => Promise<void>;
   onAssociateTask: (projectId: string, cellName: string, taskId: string) => Promise<void>;
-  onCreateTask: (projectId: string, cellName: string, t: { title: string; resp: string; status: string }) => Promise<void>;
+  onCreateTask: (projectId: string, cellName: string, t: { title: string; resp: string; status: string; zoho: string }) => Promise<void>;
   /** Borra el proyecto y todo lo que cuelga de él. Cierra el drawer al terminar. */
   onDeleteProject: (project: Project) => Promise<void>;
 }
@@ -111,7 +111,7 @@ export default function ProyectoDrawer({
   const [asocCell, setAsocCell] = useState("");
   const [asocTask, setAsocTask] = useState("");
   const [creandoTarea, setCreandoTarea] = useState(false);
-  const [nuevaTarea, setNuevaTarea] = useState({ cell: "", title: "", resp: "", status: "PENDIENTE" });
+  const [nuevaTarea, setNuevaTarea] = useState({ cell: "", title: "", resp: "", status: "PENDIENTE", zoho: "" });
   const [savingTask, setSavingTask] = useState(false);
 
   useEffect(() => {
@@ -574,6 +574,25 @@ export default function ProyectoDrawer({
                       {t.resp && (
                         <span style={{ fontSize: 10, color: UI.muted, whiteSpace: "nowrap", flexShrink: 0 }}>{t.resp}</span>
                       )}
+                      {/* Sin esto la liga de Zoho sería de solo escritura: se captura
+                          al crear la tarea y no habría dónde volver a consultarla. */}
+                      {t.zoho && (
+                        <a
+                          href={t.zoho}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          title="Abrir en Zoho Projects"
+                          onClick={e => e.stopPropagation()}
+                          style={{
+                            fontSize: 9, fontWeight: 700, flexShrink: 0,
+                            color: UI.gold, textDecoration: "none",
+                            border: `1px solid rgba(201,168,76,0.35)`, borderRadius: 999,
+                            padding: "2px 7px", whiteSpace: "nowrap",
+                          }}
+                        >
+                          Zoho ↗
+                        </a>
+                      )}
                     </div>
                   );
                 })}
@@ -628,7 +647,7 @@ export default function ProyectoDrawer({
           {/* Crear tarea nueva */}
           {!creandoTarea ? (
             <button
-              onClick={() => { setCreandoTarea(true); setNuevaTarea({ cell: "", title: "", resp: "", status: "PENDIENTE" }); }}
+              onClick={() => { setCreandoTarea(true); setNuevaTarea({ cell: "", title: "", resp: "", status: "PENDIENTE", zoho: "" }); }}
               style={{ ...btnGhost, width: "100%", borderStyle: "dashed", color: UI.muted }}
             >
               + Crear tarea nueva para este proyecto
@@ -664,6 +683,13 @@ export default function ProyectoDrawer({
                   {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
+              <input
+                placeholder="Liga de Zoho (opcional)"
+                value={nuevaTarea.zoho}
+                onChange={e => setNuevaTarea(t => ({ ...t, zoho: e.target.value }))}
+                aria-label="Liga de Zoho"
+                style={field}
+              />
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   onClick={async () => {
@@ -674,6 +700,7 @@ export default function ProyectoDrawer({
                         title: nuevaTarea.title.trim(),
                         resp: nuevaTarea.resp.trim(),
                         status: nuevaTarea.status,
+                        zoho: nuevaTarea.zoho.trim(),
                       });
                       setCreandoTarea(false);
                     } finally { setSavingTask(false); }

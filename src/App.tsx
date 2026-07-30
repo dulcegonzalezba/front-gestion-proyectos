@@ -685,12 +685,12 @@ export default function App() {
   const createTaskForProject = async (
     projectId: string,
     cellName: string,
-    t: { title: string; resp: string; status: string },
+    t: { title: string; resp: string; status: string; zoho?: string },
   ) => {
     const project = projects.find(p => p.id === projectId);
     if (!project || !d) return;
     const id = cellName.substring(0, 3).toLowerCase() + "_" + Date.now();
-    const newTask = { id, title: t.title, resp: t.resp, status: t.status, notes: "", zoho: "" };
+    const newTask = { id, title: t.title, resp: t.resp, status: t.status, notes: "", zoho: t.zoho ?? "" };
     await save({
       ...d,
       cells: {

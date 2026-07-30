@@ -20,7 +20,7 @@ interface Props {
   /** Quita el proyecto de la lista tras borrarlo en el servidor. */
   onProjectDeleted: (id: string) => void;
   onAssociateTask: (projectId: string, cellName: string, taskId: string) => Promise<void>;
-  onCreateTask: (projectId: string, cellName: string, t: { title: string; resp: string; status: string }) => Promise<void>;
+  onCreateTask: (projectId: string, cellName: string, t: { title: string; resp: string; status: string; zoho: string }) => Promise<void>;
 }
 
 interface Metricas {
