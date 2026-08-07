@@ -1,4 +1,5 @@
 import { useState } from "react";
+import SirPlusPanel from "./SirPlusPanel";
 
 // ── TYPES ─────────────────────────────────────────────────────────────────────
 type Criticality = "CRITICA" | "ALTA" | "MEDIA";
@@ -552,11 +553,13 @@ interface HomePageProps {
   onFocusUpdate?: (id: string, updates: Partial<FocusItem>) => void;
   onFocusAdd?: () => void;
   onFocusDelete?: (id: string) => void;
+  /** Lleva a la pestaña con la radiografía completa del SIR Plus. */
+  onIrASirPlus?: () => void;
 }
 
 const FOCUS_CELLS = ["DBA", "DevOps", "Backend SIR", "Frontend SIR", "Nuevas Tec", "Reporteador Nayarit", "Multi-celula"];
 
-export default function HomePage({ focusItems, tasks, week, onFocusUpdate, onFocusAdd, onFocusDelete }: HomePageProps = {}) {
+export default function HomePage({ focusItems, tasks, week, onFocusUpdate, onFocusAdd, onFocusDelete, onIrASirPlus }: HomePageProps = {}) {
   const [huaweiDone, setHuaweiDone] = useState<Set<string>>(loadHuaweiDone);
   const [editFocusId, setEditFocusId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<FocusItem>>({});
@@ -653,6 +656,9 @@ export default function HomePage({ focusItems, tasks, week, onFocusUpdate, onFoc
         <KpiCard label="Urgentes / prioritarias" value={prioTasks.length} color="#ef4444" />
         <KpiCard label="Completadas"             value={kpiDone}          color="#4ADE80" />
       </div>
+
+      {/* ── VISTA DE ÁGUILA — SIR PLUS ──────────────────────────────────── */}
+      <SirPlusPanel onVerRadiografia={onIrASirPlus} />
 
       {/* ── FOCOS DE LA SEMANA ──────────────────────────────────────────── */}
       {(() => {

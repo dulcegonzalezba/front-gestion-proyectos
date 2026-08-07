@@ -1,7 +1,8 @@
 import { storage } from "./storage";
 import { useState, useEffect, useRef, CSSProperties } from "react";
 import { useNavigate } from 'react-router-dom';
-import { clearToken, getToken, getRole } from './auth';
+import { clearToken, getToken, getRole, getVistas, fetchPerfil, type Perfil } from './auth';
+import { puedeVer } from './vistas';
 import { toast } from 'sonner';
 import { pdf } from '@react-pdf/renderer';
 import AppHeader from './AppHeader';
@@ -10,9 +11,11 @@ import ProyectosBoard from './ProyectosBoard';
 import type { Project as ProyectoBase } from './proyectoEstado';
 import SplitLayout from './SplitLayout';
 import HomePage from './HomePage';
+import RadiografiaSIR from './RadiografiaSIR';
 import AcuerdosTab from './AcuerdosTab';
 import LiberacionesTab from './LiberacionesTab';
 import PersonalTab from './PersonalTab';
+import UsuariosTab from './UsuariosTab';
 import CheckpointTimeline from './CheckpointTimeline';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 
@@ -430,7 +433,14 @@ export default function App() {
   const [checkpointList, setCheckpointList]             = useState<{ id: number; isoWeek: string; week: string; savedAt: string }[]>([]);
   const [acuerdosFilterWeek, setAcuerdosFilterWeek]     = useState("");
   const [acuerdosFilterStatus, setAcuerdosFilterStatus] = useState("Todos");
-  const [userRole]                                      = useState<string | null>(getRole());
+  // El token pinta el menú de inmediato; el perfil del servidor lo corrige en
+  // cuanto responde, para que un cambio de permisos aplique al recargar.
+  const [perfil, setPerfil]                             = useState<Perfil | null>(null);
+  const [tokenRole]                                     = useState<string | null>(getRole());
+  const [tokenVistas]                                   = useState<string[] | null>(getVistas());
+  const userRole   = perfil?.role ?? tokenRole;
+  const vistas     = perfil ? perfil.vistas : tokenVistas;
+  const esAdmin    = userRole === "pmo";
   const [libFilterProject, setLibFilterProject]         = useState("Todos");
   const [libFilterStatus, setLibFilterStatus]           = useState("Todos");
   const [personalFilterCelula, setPersonalFilterCelula] = useState("Todos");
@@ -438,6 +448,15 @@ export default function App() {
   const [personalView, setPersonalView]                 = useState<"personas" | "carga">("personas");
 
   useEffect(() => { load(); }, []);
+  useEffect(() => { fetchPerfil().then(setPerfil); }, []);
+
+  // Si la pestaña abierta deja de estar permitida (permisos recién cambiados,
+  // o un enlace directo), se cae a la primera vista que sí tenga concedida.
+  useEffect(() => {
+    if (puedeVer(vistas, tab, esAdmin)) return;
+    const primera = (vistas ?? ["home"]).find(v => puedeVer(vistas, v, esAdmin)) ?? "home";
+    setTab(primera);
+  }, [vistas, esAdmin, tab]);
   useEffect(() => { loadProjects(); }, []);
 
   const loadProjects = async () => {
@@ -3614,6 +3633,7 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
         onBackToLive={backToLive}
         pdfGenerating={pdfGenerating}
         userRole={userRole}
+        vistasPermitidas={vistas}
       />
       {tab === "home" && (
         <main style={{ flex: 1, overflowY: "auto", background: "#09090C" }}>
@@ -3624,10 +3644,21 @@ REGLAS: solo datos dados, no inventes, tono ejecutivo, NO Navojoa interno.`,
             onFocusUpdate={(id, updates) => d && save({ ...d, focus: d.focus.map(x => x.id === id ? { ...x, ...updates } : x) })}
             onFocusAdd={() => d && save({ ...d, focus: [...d.focus, { id: "F" + Date.now(), title: "Nuevo enfoque", resp: "", cell: "", status: "ESTA_SEMANA", notes: "" }] })}
             onFocusDelete={(id) => { if (d) { const deletedIds = [...new Set([...(d.deletedIds||[]), id])]; save({ ...d, deletedIds, focus: d.focus.filter(x => x.id !== id) }); } }}
+            onIrASirPlus={() => setTab("sirplus")}
           />
         </main>
       )}
-      {tab !== "home" && (
+      {tab === "sirplus" && (
+        <main style={{ flex: 1, overflowY: "auto", background: "#09090C" }}>
+          <RadiografiaSIR onIrAlPanel={() => setTab("home")} />
+        </main>
+      )}
+      {tab === "usuarios" && esAdmin && (
+        <main style={{ flex: 1, overflowY: "auto", background: "#09090C", padding: "24px 28px" }}>
+          <UsuariosTab emailActual={perfil?.email ?? null} />
+        </main>
+      )}
+      {tab !== "home" && tab !== "sirplus" && tab !== "usuarios" && (
       <SplitLayout leftContent={renderLeftPanel()}>
         <div style={{padding: 16}}>
           {tab === "celulas" && (

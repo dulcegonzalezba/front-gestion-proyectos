@@ -3,6 +3,8 @@ import LiveModeIndicator from "./LiveModeIndicator";
 interface AppHeaderProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
+  /** Vistas concedidas al usuario. `null` = todas. Los admin ignoran este filtro. */
+  vistasPermitidas?: string[] | null;
   week?: string;
   onLogout: () => void;
   onRefresh: () => void;
@@ -17,6 +19,7 @@ interface AppHeaderProps {
 
 const BASE_TABS: [string, string][] = [
   ["home", "Inicio"],
+  ["sirplus", "SIR Plus"],
   ["celulas", "Células"],
   ["proyectos", "Proyectos"],
   ["pmo", "PMO"],
@@ -33,12 +36,14 @@ const BTN_BASE = {
 export default function AppHeader({
   activeTab, onTabChange, week, onLogout, onRefresh,
   refreshing, liveIndicatorState, onSaveCheckpoint, onGeneratePdf, onBackToLive, pdfGenerating,
-  userRole,
+  userRole, vistasPermitidas,
 }: AppHeaderProps) {
-  // La pestaña RH (personal) solo es visible para rol 'pmo' — datos sensibles.
-  const TABS: [string, string][] = userRole === "pmo"
-    ? [...BASE_TABS, ["personal", "RH"] as [string, string]]
-    : BASE_TABS;
+  const esAdmin = userRole === "pmo";
+  // RH (datos sensibles) y Usuarios solo existen para el rol 'pmo'.
+  // El resto se filtra por las vistas concedidas a cada persona.
+  const TABS: [string, string][] = esAdmin
+    ? [...BASE_TABS, ["personal", "RH"] as [string, string], ["usuarios", "Usuarios"] as [string, string]]
+    : BASE_TABS.filter(([key]) => vistasPermitidas == null || vistasPermitidas.includes(key));
   return (
     <header
       role="banner"
