@@ -16,7 +16,9 @@
  * marca allá.
  */
 
-import { CAPAS, idsDeCapa } from "./sirPlusCapas";
+import { useState } from "react";
+import { CAPAS, idsDeCapa, idsDeNodo, type Capa, type Nodo } from "./sirPlusCapas";
+import ListaChecks from "./SirPlusNodo";
 import {
   ESTADOS, CICLO, estadoDe, resumirEstados, useSirPlusEstado,
   type EstadoKey, type EstadoMap,
@@ -285,6 +287,148 @@ function contarPorEstado(map: EstadoMap, ids: string[]) {
   return base;
 }
 
+/** Barra que resume la mezcla de estados de un conjunto de puntos. */
+function Mezcla({ ids, map }: { ids: string[]; map: EstadoMap }) {
+  const c = contarPorEstado(map, ids);
+  if (!ids.length) return null;
+  return (
+    <div style={{ display: "flex", height: 5, borderRadius: 3, overflow: "hidden", background: "#0B0D14" }}>
+      {CICLO.filter(e => c[e] > 0).map(e => (
+        <div key={e} title={`${ESTADOS[e].label}: ${c[e]}`}
+          style={{ width: `${(c[e] / ids.length) * 100}%`, background: ESTADOS[e].color, opacity: e === "sin_verificar" ? 0.3 : 0.9 }} />
+      ))}
+    </div>
+  );
+}
+
+// ── Capa desplegable: sus grupos, sus nodos y los puntos de cada nodo ──────────
+
+interface CapaDesplegableProps {
+  capa: Capa;
+  map: EstadoMap;
+  onCiclar: (id: string) => void;
+  onActualizar: (id: string, cambios: { evidencia?: string; resp?: string; estado?: EstadoKey }) => void;
+}
+
+function CapaDesplegable({ capa, map, onCiclar, onActualizar }: CapaDesplegableProps) {
+  const [abierta, setAbierta] = useState(false);
+  const [nodoAbierto, setNodoAbierto] = useState<string | null>(null);
+
+  const ids = idsDeCapa(capa);
+  const c = contarPorEstado(map, ids);
+  const resumen = resumirEstados(ids.map(id => estadoDe(map, id)));
+  const pct = ids.length ? Math.round(((c.ok + c.na) / ids.length) * 100) : 0;
+
+  return (
+    <div style={{
+      background: `linear-gradient(160deg, ${capa.color}10 0%, ${T.surface} 60%)`,
+      border: `1px solid ${capa.color}40`,
+      borderTop: `3px solid ${capa.color}`,
+      borderRadius: 12, overflow: "hidden",
+      gridColumn: abierta ? "1 / -1" : "auto",
+    }}>
+      {/* Cabecera */}
+      <button
+        onClick={() => setAbierta(a => !a)}
+        aria-expanded={abierta}
+        style={{
+          width: "100%", textAlign: "left", cursor: "pointer", background: "none",
+          border: "none", padding: "15px 16px", fontFamily: "system-ui,sans-serif",
+          display: "block",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <Punto estado={resumen} />
+          <span style={{ fontSize: 14, fontWeight: 800, color: T.text1, flex: 1 }}>{capa.nombre}</span>
+          <span style={{
+            fontSize: 10, color: capa.color, fontWeight: 700,
+            border: `1px solid ${capa.color}44`, borderRadius: 7, padding: "3px 9px", whiteSpace: "nowrap",
+          }}>
+            {abierta ? "▾ Cerrar" : "▸ Ver los puntos"}
+          </span>
+        </div>
+        <div style={{ fontSize: 10, color: capa.color, marginBottom: 10, fontWeight: 600 }}>{capa.sub}</div>
+        <div style={{ fontSize: 10.5, color: T.text2, lineHeight: 1.55, marginBottom: 12, minHeight: abierta ? 0 : 46 }}>
+          {capa.descripcion}
+        </div>
+        <Mezcla ids={ids} map={map} />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: T.text3, marginTop: 8 }}>
+          <span>{ids.length} puntos a considerar · {capa.grupos.length} bloques</span>
+          <span style={{ color: pct > 0 ? "#22C55E" : T.text3, fontWeight: 700 }}>{pct}%</span>
+        </div>
+      </button>
+
+      {/* Contenido */}
+      {abierta && (
+        <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${capa.color}25` }}>
+          {capa.grupos.map(grupo => (
+            <div key={grupo.id} style={{ marginTop: 16 }}>
+              <div style={{
+                fontSize: 9, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase",
+                color: T.text3, marginBottom: 9, display: "flex", alignItems: "center", gap: 8,
+              }}>
+                <span style={{ width: 4, height: 4, borderRadius: "50%", background: capa.color, display: "inline-block" }} />
+                {grupo.nombre}
+              </div>
+
+              {grupo.nodos.map((nodo: Nodo) => {
+                const nIds = idsDeNodo(nodo);
+                const nResumen = resumirEstados(nIds.map(id => estadoDe(map, id)));
+                const nc = contarPorEstado(map, nIds);
+                const expandido = nodoAbierto === nodo.id;
+                return (
+                  <div key={nodo.id} style={{
+                    background: expandido ? "#0B0D14" : T.card,
+                    border: `1px solid ${nResumen === "sin_verificar" ? T.border : ESTADOS[nResumen].color + "35"}`,
+                    borderRadius: 10, marginBottom: 7, overflow: "hidden",
+                  }}>
+                    <button
+                      onClick={() => setNodoAbierto(expandido ? null : nodo.id)}
+                      aria-expanded={expandido}
+                      style={{
+                        width: "100%", textAlign: "left", cursor: "pointer", background: "none",
+                        border: "none", padding: "12px 14px", fontFamily: "system-ui,sans-serif",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                        <Punto estado={nResumen} size={8} />
+                        <span style={{ fontSize: 12, fontWeight: 700, color: T.text1, flex: 1, minWidth: 160 }}>{nodo.nombre}</span>
+                        <span style={{ fontSize: 9.5, color: T.text3, whiteSpace: "nowrap" }}>
+                          {nc.ok + nc.na}/{nIds.length} resueltos
+                        </span>
+                        <span style={{ fontSize: 11, color: T.text3 }}>{expandido ? "▾" : "▸"}</span>
+                      </div>
+                      {!expandido && (
+                        <div style={{ fontSize: 10, color: T.text2, lineHeight: 1.5, marginTop: 6 }}>{nodo.resumen}</div>
+                      )}
+                    </button>
+
+                    {expandido && (
+                      <div style={{ padding: "0 14px 14px" }}>
+                        <div style={{ fontSize: 10.5, color: T.text2, lineHeight: 1.6, marginBottom: 10 }}>{nodo.resumen}</div>
+                        {nodo.pregunta && (
+                          <div style={{
+                            padding: "9px 12px", background: T.surface, marginBottom: 12,
+                            borderLeft: `3px solid ${capa.color}`, borderRadius: "0 8px 8px 0",
+                            fontSize: 11.5, color: T.text1, fontWeight: 600, lineHeight: 1.45,
+                          }}>
+                            {nodo.pregunta}
+                          </div>
+                        )}
+                        <ListaChecks nodo={nodo} map={map} onCiclar={onCiclar} onActualizar={onActualizar} fondo={T.surface} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Página ────────────────────────────────────────────────────────────────────
 
 interface RadiografiaSIRProps {
@@ -292,7 +436,7 @@ interface RadiografiaSIRProps {
 }
 
 export default function RadiografiaSIR({ onIrAlPanel }: RadiografiaSIRProps = {}) {
-  const { map, ciclar } = useSirPlusEstado();
+  const { map, ciclar, actualizar } = useSirPlusEstado();
 
   const seccion = (mb = 20): React.CSSProperties => ({
     background: `linear-gradient(160deg, ${T.card} 0%, #12141C 100%)`,
@@ -637,40 +781,14 @@ export default function RadiografiaSIR({ onIrAlPanel }: RadiografiaSIRProps = {}
         <div style={{ fontSize: 11.5, color: T.text2, lineHeight: 1.7, marginBottom: 16, maxWidth: 840 }}>
           El sistema no vive solo: se sostiene sobre infraestructura, sobre la forma en que el código llega a
           producción y sobre las decisiones de seguridad y datos personales. Estas cuatro capas son el índice de todo
-          lo que hay que considerar para armar la arquitectura, con su método de comprobación punto por punto.
+          lo que hay que considerar para armar la arquitectura. Abre una capa para ver sus bloques, y un bloque para
+          leer punto por punto qué hay que reforzar y con qué se comprueba — se pueden marcar aquí mismo.
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-          {CAPAS.map(capa => {
-            const ids = idsDeCapa(capa);
-            const c = contarPorEstado(map, ids);
-            const resumen = resumirEstados(ids.map(id => estadoDe(map, id)));
-            const pct = ids.length ? Math.round(((c.ok + c.na) / ids.length) * 100) : 0;
-            return (
-              <div key={capa.id} style={{
-                background: `linear-gradient(160deg, ${capa.color}10 0%, ${T.surface} 60%)`,
-                border: `1px solid ${capa.color}40`,
-                borderTop: `3px solid ${capa.color}`, borderRadius: 12, padding: "15px 16px",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <Punto estado={resumen} />
-                  <span style={{ fontSize: 14, fontWeight: 800, color: T.text1 }}>{capa.nombre}</span>
-                </div>
-                <div style={{ fontSize: 10, color: capa.color, marginBottom: 10, fontWeight: 600 }}>{capa.sub}</div>
-                <div style={{ fontSize: 10.5, color: T.text2, lineHeight: 1.55, marginBottom: 12, minHeight: 46 }}>{capa.descripcion}</div>
-                <div style={{ display: "flex", height: 5, borderRadius: 3, overflow: "hidden", background: "#0B0D14", marginBottom: 8 }}>
-                  {CICLO.filter(e => c[e] > 0).map(e => (
-                    <div key={e} title={`${ESTADOS[e].label}: ${c[e]}`}
-                      style={{ width: `${(c[e] / ids.length) * 100}%`, background: ESTADOS[e].color, opacity: e === "sin_verificar" ? 0.3 : 0.9 }} />
-                  ))}
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: T.text3 }}>
-                  <span>{ids.length} puntos a considerar</span>
-                  <span style={{ color: pct > 0 ? "#22C55E" : T.text3, fontWeight: 700 }}>{pct}%</span>
-                </div>
-              </div>
-            );
-          })}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, alignItems: "start" }}>
+          {CAPAS.map(capa => (
+            <CapaDesplegable key={capa.id} capa={capa} map={map} onCiclar={ciclar} onActualizar={actualizar} />
+          ))}
         </div>
       </div>
 
